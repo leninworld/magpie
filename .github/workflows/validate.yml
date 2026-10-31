@@ -1,0 +1,27 @@
+name: Validate IMAP caller ID canonicalisation
+on:
+  push:
+    branches: [validate-imap-thread-ids-1924]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Record validation job clock
+        run: echo "VALIDATION_JOB_STARTED_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Read diagnostic packet
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          path: packet
+      - name: Read pinned upstream source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: apache/magpie
+          ref: ff82fd3544ae52005f3aefea0c29b69948639537
+          persist-credentials: false
+          path: source
+      - name: Run bounded Docker validation
+        run: python3 packet/host.py

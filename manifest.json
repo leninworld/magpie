@@ -1,0 +1,101 @@
+{
+  "base": "ff82fd3544ae52005f3aefea0c29b69948639537",
+  "patch_sha256": "30faace009374970a75f4a79c97da4f2891e4176732a275977ab89eb4b76511f",
+  "source": [
+    {
+      "path": "tools/mail-source/imap/README.md",
+      "sha256": "6a4434dd9eea16f919626f97e47f11a2da870dc74319245a867a07271755425a",
+      "bytes": 8988
+    },
+    {
+      "path": "tools/mail-source/imap/src/imap_source/create_draft.py",
+      "sha256": "c3993f2c89077eda82bfb780e62a448b66dc1fe122df3a6f71f015ecaf626931",
+      "bytes": 5786
+    },
+    {
+      "path": "tools/mail-source/imap/src/imap_source/list_drafts.py",
+      "sha256": "e07f4dfe6bc25ba8d6e9a7c7066d86eeb59abda74ba631e2832ac0ce79a0b315",
+      "bytes": 3208
+    },
+    {
+      "path": "tools/mail-source/imap/src/imap_source/list_sent_since.py",
+      "sha256": "37fc4dada8e4d26d4335d729a87d1094a62fa5653c4af897c0ae63a80a745d85",
+      "bytes": 3305
+    },
+    {
+      "path": "tools/mail-source/imap/src/imap_source/read_thread.py",
+      "sha256": "c46924601c69a29d19e5f94c50ffdbcf4ce6b408c7dadaaa4aa6b53785e85083",
+      "bytes": 4367
+    },
+    {
+      "path": "tools/mail-source/imap/src/imap_source/thread_url.py",
+      "sha256": "5fdd4afc6272e48c958b43e6bfba95b170950ca70456801efd9b67c2b674e875",
+      "bytes": 2189
+    },
+    {
+      "path": "tools/mail-source/imap/src/imap_source/threads.py",
+      "sha256": "11ea35bd8cbffd4a3867b18e9712822b811742737042d09eb2a76b7752ce7514",
+      "bytes": 4447
+    },
+    {
+      "path": "tools/mail-source/imap/tests/test_cli_thread_ids.py",
+      "sha256": "4467ecb09898519510f5080b4012f1ad009981619f1b8cc56a71593083389297",
+      "bytes": 1793
+    },
+    {
+      "path": "tools/mail-source/imap/tests/test_config_and_urls.py",
+      "sha256": "d079ec2570df8a4a34de02a725f9cdf1a59295cc1ec101b3f0d74b15f461c617",
+      "bytes": 3795
+    },
+    {
+      "path": "tools/mail-source/imap/tests/test_create_draft.py",
+      "sha256": "d5d11a7807b55df41ae06dd5aa0de94fa9cd1c0e1f11497d1f820226168a6317",
+      "bytes": 5639
+    },
+    {
+      "path": "tools/mail-source/imap/tests/test_operations.py",
+      "sha256": "563a8bfd35a8e012b145eb5663500152092f59d2e4754d535f5010e73a0cb4ad",
+      "bytes": 8979
+    },
+    {
+      "path": "tools/mail-source/imap/tests/test_threads.py",
+      "sha256": "49f2e7f4768df2d0a9238599e2858c396881d6360b4c87a6a28de5ed1dcca0e7",
+      "bytes": 4375
+    }
+  ],
+  "image": "ghcr.io/astral-sh/uv@sha256:8d1825eb3e41b0142309f4a1c5c7781f072d8c8c9964ea073f34788a030bbeba",
+  "node": {
+    "version": "22.20.0",
+    "npm": "10.9.3",
+    "bytes": 30737976,
+    "sha256": "00bbd05e306ea68b6e13e17360d0e2f680b493ef95f2fea1c4296ff7437530bc",
+    "checksum_provenance": "H475 official SHASUMS256.txt reuse; exact named target",
+    "runtime_unrun": true
+  },
+  "tokenizer": {
+    "cache_key": "9b5ad71b2ce5302211f9c61530b329a4922fc6a4",
+    "bytes": 1681126,
+    "sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
+  },
+  "lychee_lock_sha256": "0b181ed9523134a33ecca09587b7ca11a5f82abd0cd762194e71aaeb8b8bc42b",
+  "downloads": {
+    "node.tar.xz": {
+      "url": "https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.xz",
+      "bytes": 30737976,
+      "sha256": "00bbd05e306ea68b6e13e17360d0e2f680b493ef95f2fea1c4296ff7437530bc"
+    },
+    "tokenizer.bpe": {
+      "url": "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken",
+      "bytes": 1681126,
+      "sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
+    },
+    "jq": {
+      "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64",
+      "bytes": 2255816,
+      "sha256": "020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d"
+    }
+  },
+  "scope": "Magpie1924 one whole-contract input canonicalisation validation; no old1823 or Forgetful rerun",
+  "approval_finished": true,
+  "codex_agree": true
+}
