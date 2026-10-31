@@ -1,0 +1,1349 @@
+diff --git a/.claude/settings.json b/.claude/settings.json
+index f1aa1bd49..967538d94 100644
+--- a/.claude/settings.json
++++ b/.claude/settings.json
+@@ -84,6 +84,7 @@
+       "mcp__apache-projects__search_projects"
+     ],
+     "deny": [
++      "Edit(~/.config/husky/**)",
+       "Read(~/.aws/**)",
+       "Read(~/.ssh/**)",
+       "Read(~/.netrc)",
+diff --git a/docs/setup/secure-agent-setup.md b/docs/setup/secure-agent-setup.md
+index a1701791c..d04f4c6e4 100644
+--- a/docs/setup/secure-agent-setup.md
++++ b/docs/setup/secure-agent-setup.md
+@@ -1449,6 +1449,7 @@ dispatchers + hook-manager shim):
+ 
+ | Repo's local hook | Result |
+ |---|---|
++| Husky 9.1.7 after SessionStart relocation (validation pending) | dispatcher → actual worktree `.husky/_/<name>` → repository hook; failures abort non-post-checkout operations; repeat installs require another SessionStart |
+ | prek shim in `.git/hooks/` (installed via the shim) | dispatcher → prek runs that repo's `.pre-commit-config.yaml` |
+ | local hook installed by a manager requiring no install fix (`simple-git-hooks`, `cargo-husky`, `git-code-format-maven-plugin`, `git-build-hook`) | dispatcher → local hook runs natively (installs straight to `.git/hooks/` ignoring global `core.hooksPath`) |
+ | hand-written `.git/hooks/<name>`, or one a manager without an adapter put there | dispatcher → that hook runs (heterogeneous tooling coexists) |
+@@ -4270,3 +4271,28 @@ gaps; together they are the actual sandbox.
+   files (`<tracker>`, `<upstream>`, `<security-list>`, …).
+ - [`README.md`](../../README.md) — framework overview and how the
+   secure setup fits the broader skill workflow.
++
++
++### Husky host-init protection boundary
++
++The host-side `init.sh` guard covers the framework's configured write grants,
++readable user settings, project/local settings for every worktree, and the
++documented managed JSON files and drop-ins. It does not reconstruct grants
++supplied only through CLI/SDK additions or non-file server/MDM policy. Operators
++who widen write access through those unsupported modes are outside this
++protection, as with the existing host-only manager-home rule. This is not a
++claim of universal effective-settings inspection.
++
++Unknown grant forms fail closed. In particular, hooks are refused while a
++relative `additionalDirectories` entry exists: spell it as an absolute or
++home-relative directory. Relative Edit paths with `..`, and source-relative
++Edit paths in managed settings whose anchor cannot be established, are refused.
++The check reads at most 1 MiB per settings file and 8 MiB in total.
++
++The committed `Edit(~/.config/husky/**)` deny is a second layer for the default
++location. Claude Code documents [deny-before-allow precedence across settings
++scopes](https://code.claude.com/docs/en/permissions#settings-precedence) and
++[conversion of Edit denies into the sandbox filesystem deny list](https://code.claude.com/docs/en/settings-reference#sandboxfilesystem).
++That protects the default path when these rules are loaded and the documented
++sandbox filesystem enforcement is enabled. It does not establish protection for
++arbitrary XDG paths, disabled filesystem isolation or unseen policy sources.
+diff --git a/plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md b/plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md
+index 8238917ff..a806086d9 100644
+--- a/plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md
++++ b/plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md
+@@ -333,10 +333,12 @@ for the full rationale + the validated behaviour matrix.
+    into `~/.claude/bin/<tool>` (or symlink from
+    `~/.claude-config/bin/<tool>`), mode `0755`, once for each adapter in the
+    [hook-manager registry](../../../../tools/hook-manager/registry.json)
+-   with an install strategy other than `none`
++   with the `git-dir-flag` install strategy
+    that a repository the operator works in uses — `~/.claude/bin/prek` today.
+-   A manager whose install strategy is `none` needs no install fix
+-   and gets no shim.
++   A manager whose install strategy is `none` needs no install fix.
++   Husky's `session-start-relocation` instead reconciles its exact `.husky/_`
++   config at SessionStart; do not install a PATH shim for it. See the
++   [Husky contract](../../../../tools/hook-manager/README.md#husky-session-start-relocation).
+    A repository uses a manager when one of its config files is at the root
+    (or tracked below it, for prek's nested projects) or one of its installed
+    hooks runs it ([Detection](../../../../tools/hook-manager/README.md#detection));
+diff --git a/plugins/magpie-setup/skills/setup/setup_preflight/isolated.py b/plugins/magpie-setup/skills/setup/setup_preflight/isolated.py
+index f01fef5f2..896a95013 100644
+--- a/plugins/magpie-setup/skills/setup/setup_preflight/isolated.py
++++ b/plugins/magpie-setup/skills/setup/setup_preflight/isolated.py
+@@ -447,7 +447,9 @@ def _shown(value: str) -> str:
+     return repr(cleaned)
+ 
+ 
+-def _core_hooks_path_lines(text: str) -> tuple[list[int], list[str]] | None:
++def _config_path_lines(
++    text: str, target_section: str, key: re.Pattern[str]
++) -> tuple[list[int], list[str]] | None:
+     """Indices and values of `[core] hooksPath` lines, or None when the file is not plain enough.
+ 
+     Only a plain file is rewritten: an `include` directive, a continued or
+@@ -477,8 +479,11 @@ def _core_hooks_path_lines(text: str) -> tuple[list[int], list[str]] | None:
+             return None  # a header this parser does not understand
+         if line.rstrip().endswith("\\"):
+             return None
+-        match = _HOOKS_PATH_RE.match(line)
+-        if section == "core" and not line.lstrip().startswith("[") and match:
++        bare = re.split(r"[#;]", stripped, maxsplit=1)[0].strip()
++        if section == target_section and "=" not in bare and key.match(bare + " = "):
++            return None  # a bare boolean of this target key is an ambiguous path
++        match = key.match(line)
++        if section == target_section and not line.lstrip().startswith("[") and match:
+             value = match.group(1)
+             if len(value) >= 2 and value[0] == value[-1] == '"':
+                 value = value[1:-1]
+@@ -487,6 +492,60 @@ def _core_hooks_path_lines(text: str) -> tuple[list[int], list[str]] | None:
+     return indices, values
+ 
+ 
++def _core_hooks_path_lines(text: str) -> tuple[list[int], list[str]] | None:
++    return _config_path_lines(text, "core", _HOOKS_PATH_RE)
++
++
++def _saved_hooks_path_lines(text: str) -> tuple[list[int], list[str]] | None:
++    return _config_path_lines(text, "magpie", re.compile(r"^\s*localhookspath\s*=\s*(.*?)\s*$", re.I))
++
++
++def _read_plain_nofollow(path: Path, limit: int) -> str:
++    """A bounded regular-file read, refusing symlinks in every path component."""
++    absolute = Path(os.path.abspath(path))
++    dfd = os.open(absolute.anchor, os.O_RDONLY | _DIRECTORY)
++    try:
++        for part in absolute.parts[1:-1]:
++            next_fd = os.open(part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=dfd)
++            os.close(dfd)
++            dfd = next_fd
++        fd = os.open(absolute.name, os.O_RDONLY | _NOFOLLOW, dir_fd=dfd)
++        with os.fdopen(fd, encoding="utf-8", errors="strict") as handle:
++            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
++                raise ValueError("not a regular file")
++            text = handle.read(limit + 1)
++            if len(text) > limit:
++                raise ValueError("file too large")
++            return text
++    finally:
++        os.close(dfd)
++
++
++def _linked_husky_notice(checkout: Path) -> list[str]:
++    """Inspect pointer/common config read-only; never invoke Git or rewrite it."""
++    try:
++        pointer = _read_plain_nofollow(checkout / ".git", 4096).splitlines()
++        if len(pointer) != 1 or not pointer[0].startswith("gitdir: "):
++            return []
++        directory = Path(pointer[0][8:])
++        gitdir = directory if directory.is_absolute() else checkout / directory
++        relative = _read_plain_nofollow(gitdir / "commondir", 4096).splitlines()
++        if len(relative) != 1 or not relative[0]:
++            return []
++        common = Path(relative[0])
++        common = common if common.is_absolute() else gitdir / common
++        text = _read_plain_nofollow(common / "config", 1024 * 1024)
++        paths = _core_hooks_path_lines(text)
++        if paths is None or paths[1] != [".husky/_"]:
++            return []
++    except (OSError, UnicodeError, ValueError):
++        return []  # no safe pointer chain: preserve the existing no-op
++    return [
++        "Linked worktree: no hooks config was changed. Husky overrides the dispatcher; "
++        "start a session in the main checkout first; config.worktree is unsupported."
++    ]
++
++
+ def _rewrite_repo_config(checkout: Path, home: Path, own_hooks: Path) -> list[str]:
+     """Drop `core.hooksPath` from `<checkout>/.git/config` when it names `own_hooks`.
+ 
+@@ -503,7 +562,7 @@ def _rewrite_repo_config(checkout: Path, home: Path, own_hooks: Path) -> list[st
+         try:
+             gfd = os.open(".git", os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=cfd)
+         except OSError:
+-            return []  # a linked worktree's .git file, a symlink, or none
++            return _linked_husky_notice(checkout)  # no writes through a .git pointer
+         try:
+             try:
+                 fd = os.open("config", os.O_RDONLY | _NOFOLLOW, dir_fd=gfd)
+@@ -526,13 +585,48 @@ def _rewrite_repo_config(checkout: Path, home: Path, own_hooks: Path) -> list[st
+                     f"{config} may set core.hooksPath (it uses includes); check it skips no hooks you need"
+                 ]
+             indices, values = parsed
++            saved = _saved_hooks_path_lines(text)
++            if saved is None or len(saved[1]) > 1 or any(v != ".husky/_" for v in saved[1]):
++                return ["Husky relocation refused: conflicting magpie.localHooksPath; inspect it by hand"]
++            worktree = _config_path_lines(
++                text, "extensions", re.compile(r"^\s*worktreeconfig\s*=\s*(.*?)\s*$", re.I)
++            )
++            try:
++                os.stat("config.worktree", dir_fd=gfd, follow_symlinks=False)
++            except FileNotFoundError:
++                has_worktree_config = False
++            except OSError:
++                has_worktree_config = True
++            else:
++                has_worktree_config = True
++            husky_config = values == [".husky/_"] or bool(saved[1])
++            enabled = worktree is None or any(
++                value.lower() not in ("false", "no", "off", "0") for value in worktree[1]
++            )
++            explicitly_disabled = worktree is not None and bool(worktree[1]) and not enabled
++            if husky_config and (enabled or (has_worktree_config and not explicitly_disabled)):
++                return ["Husky relocation does not support config.worktree; inspect hooks paths by hand"]
+             if not values:
+                 return []
+-            if len(values) == 1 and _resolved(values[0], checkout, home) == own_hooks:
++            husky = values == [".husky/_"]
++            if husky:
++                try:
++                    target = (checkout / ".husky" / "_").resolve(strict=True)
++                    target.relative_to(checkout.resolve())
++                    if not target.is_dir():
++                        raise ValueError("not a directory")
++                except (OSError, RuntimeError, ValueError):
++                    return ["Husky relocation refused: hook directory is missing or escapes the checkout"]
++            if husky or (len(values) == 1 and not saved[1] and _resolved(values[0], checkout, home) == own_hooks):
+                 lines = text.splitlines(keepends=True)
+                 kept = "".join(line for number, line in enumerate(lines) if number != indices[0])
++                if husky and not saved[1]:
++                    kept = kept.rstrip("\n") + "\n[magpie]\n\tlocalHooksPath = .husky/_\n"
+                 # The result must read back plain and without the key, or nothing is written.
+-                if _core_hooks_path_lines(kept) != ([], []):
++                saved_after = _saved_hooks_path_lines(kept)
++                if _core_hooks_path_lines(kept) != ([], []) or (
++                    husky and (saved_after is None or saved_after[1] != [".husky/_"])
++                ):
+                     return [f"{config} sets core.hooksPath={_shown(values[0])}; unset it by hand"]
+                 tmp_name = f".config.{secrets.token_hex(8)}.tmp"
+                 try:
+@@ -572,8 +666,9 @@ def drop_redundant_hooks_path(root: Path, home: Path | None = None) -> list[str]
+     that sets `core.hooksPath` to its own `.git/hooks` (some `prek install`
+     runs do) skips the dispatcher, and with it the host-only prek home for
+     hooks run outside the sandbox. The dispatcher chains to `.git/hooks`
+-    anyway, so that value is redundant and is removed; any other value is only
+-    reported. Main checkouts only: a linked worktree's config lives in a common
++    anyway, so that value is redundant and is removed. Husky's exact `.husky/_`
++    is instead saved as `magpie.localHooksPath` for the dispatcher to resolve
++    against each worktree. Other values are only reported. Main checkouts only: a linked worktree's config lives in a common
+     directory its sandbox-writable `.git` file names.
+     """
+     home = home if home is not None else Path.home()
+@@ -584,6 +679,8 @@ def drop_redundant_hooks_path(root: Path, home: Path | None = None) -> list[str]
+     if Path(os.path.realpath(hooks_dir / "post-checkout")).name != "git-hook-dispatcher.sh":
+         return []
+     checkout = _checkout(root)
++    if _git_config(home, "--global", "--get-all", "magpie.localHooksPath") is not None:
++        return ["Husky relocation refused: magpie.localHooksPath must be repository-local, not global"]
+     return _rewrite_repo_config(checkout, home, Path(os.path.realpath(checkout / ".git" / "hooks")))
+ 
+ 
+diff --git a/tools/agent-isolation/README.md b/tools/agent-isolation/README.md
+index 226353a7a..8ceb789e1 100644
+--- a/tools/agent-isolation/README.md
++++ b/tools/agent-isolation/README.md
+@@ -97,8 +97,8 @@ per runtime — see [`docs/adapters/add-a-harness.md`](../../docs/adapters/add-a
+ | [`claude-term-bg.sh`](claude-term-bg.sh) | **Opt-in quality-of-life helper (not a security control).** Keeps a calm baseline background and tints it only when Claude genuinely wants you to act (never while working, and never when it merely *finished* a turn), so a window you've tabbed away from can't sit blocked unnoticed. Distinguishes "blocked on a decision" from "finished and idle" — which look identical at the `Stop` event — via three signals across six hooks: `Stop` → `stop` (heuristic — tints only if the final assistant message reads as a question/request; a completion stays calm; needs `python3`/`python`, else defaults calm); `PreToolUse` (matcher `AskUserQuestion`) → `wait` (exact — a structured question was posed); `PostToolUse` (matcher `*`) → `reset` (calm while working, and clears the tint the instant you approve a permission prompt or answer a question); `Notification` → `notify` (tints for permission prompts only — the plain idle ping is a no-op so it can't wipe a pending question's tint); and `UserPromptSubmit` + `SessionStart` → `reset` (you replied / fresh session clears any stale tint). Writes the OSC escape to the Claude pty discovered by walking the process tree (hooks have no controlling tty); the only deterministic reset is an explicit `CLAUDE_RESET_BG` colour via OSC 11 (iTerm2 ignores OSC 111). Colours overridable via `CLAUDE_WAIT_BG` / `CLAUDE_RESET_BG`. Tested on iTerm2 + macOS; fail-soft elsewhere. See [`docs/setup/secure-agent-setup.md` → *Waiting-for-input terminal tint*](../../docs/setup/secure-agent-setup.md#waiting-for-input-terminal-tint). |
+ | [`sandbox-add-project-root.sh`](sandbox-add-project-root.sh) | Adds the current adopter repo's project root (and, with `--all-worktrees`, every linked git worktree's working dir) as an explicit absolute path to `sandbox.filesystem.allowRead` and `allowWrite` in the project-local, gitignored `<repo>/.claude/settings.local.json` — one entry per worktree, each in that worktree's own settings file. Defensive against [issue #197](https://github.com/apache/magpie/issues/197) — `allowRead: ["."]` does not in practice cover CWD because the harness pre-resolves the `.` literal away from the read side. The same harness behaviour drops the committed home-directory entries, so it also adds the dev-tool paths `prek` and `uv` need (`~/.gitconfig`, `~/.config/git`, `~/.cache`, `~/.local/share/uv`, `~/.local/bin`; the cache and uv dirs writable) as absolute paths — never the credential paths; `--no-tool-paths` skips them. See [`prek` or `uv` not found inside the sandbox](../../docs/setup/sandbox-troubleshooting.md#prek-or-uv-not-found-or-cannot-write-its-cache-inside-the-sandbox). Never modifies user-scope or committed project-scope. Idempotent, atomic, tolerant of missing prereqs. Invoked from `setup-isolated-setup-install`, `/magpie-setup:setup` (adopt / upgrade / worktree-init), and the `post-checkout` git hook installed by `/magpie-setup:setup adopt`. |
+ | [`git-global-post-checkout.sh`](git-global-post-checkout.sh) | Universal `post-checkout` git hook installed at `~/.claude/git-hooks/post-checkout` when the operator picks the **simple whole-user** flavour in `setup-isolated-setup-install`. Activated by `git config --global core.hooksPath ~/.claude/git-hooks/` so every `git checkout` / `git clone` / `git worktree add` across the host invokes it. Best-effort + idempotent + `\|\| true`: invokes `sandbox-add-project-root.sh` for any worktree with a `.claude/` directory. Trade-off documented in [`docs/setup/secure-agent-setup.md` → *Per-project vs whole-user scope*](../../docs/setup/secure-agent-setup.md#per-project-vs-whole-user-scope): `core.hooksPath` shadows per-repo `.git/hooks/*` across every repo on the host. The **dispatcher** flavour (below) supersedes this file. |
+-| [`git-hook-dispatcher.sh`](git-hook-dispatcher.sh) | Universal, basename-keyed git-hook **dispatcher** for the **whole-user dispatcher** flavour. Symlinked to every hook name under `~/.claude/git-hooks/`. For each git operation it runs the framework's own logic for that hook type (the `post-checkout` sandbox-allowlist sync) **and then chains through to the repo-local `.git/hooks/<name>`** (resolved via `git rev-parse --git-common-dir`, worktree-safe; `exec`-ed with original argv + inherited stdin so a failing local hook still aborts the git op). Restores per-repo hooks (prek / pre-commit / husky / hand-written) under global `core.hooksPath`; a repo with no local hook is a clean no-op. Outside the sandbox it also gives every hook manager in the [hook-manager registry](../hook-manager/registry.json) its host-only home (the contract's home rule). See [`docs/setup/secure-agent-setup.md` → *Whole-user with the per-repo dispatcher*](../../docs/setup/secure-agent-setup.md#whole-user-with-the-per-repo-dispatcher). |
+-| [`hook-manager-shim.sh`](hook-manager-shim.sh) | Transparent front for a git-hook manager, installed as `~/.claude/bin/<tool>` (with `~/.claude/bin` prepended to PATH) for the whole-user dispatcher flavour, one install per adapter in the [hook-manager registry](../hook-manager/registry.json) whose install strategy is not `none` (`prek` today). The tool is the name it is installed under. Rewrites **only** the adapter's install subcommand so the hook lands in the repo-local `.git/hooks/` where the dispatcher chains, instead of the shared `core.hooksPath` dir — for prek, injecting `--git-dir "$(git rev-parse --git-common-dir)"` unless the caller already passed `--git-dir`, asked for `--help`, or is outside a git work tree. Every other invocation passes through unchanged; no-op on hosts with no global `core.hooksPath`. Implements the install-target rule of the [hook-manager contract](../hook-manager/README.md). |
++| [`git-hook-dispatcher.sh`](git-hook-dispatcher.sh) | Universal, basename-keyed git-hook **dispatcher** for the **whole-user dispatcher** flavour. Symlinked to every hook name under `~/.claude/git-hooks/`. For each git operation it runs the framework's own logic for that hook type (the `post-checkout` sandbox-allowlist sync) **and then chains through to the repo-local `.git/hooks/<name>`**, or the real worktree-local `.husky/_/<name>` after [Husky SessionStart relocation](../hook-manager/README.md#husky-session-start-relocation) (resolved via `git rev-parse --git-common-dir`, worktree-safe; `exec`-ed with original argv + inherited stdin so a failing local hook still aborts the git op). Restores per-repo hooks (prek / pre-commit / husky / hand-written) under global `core.hooksPath`; a repo with no local hook is a clean no-op. Outside the sandbox it also gives every hook manager in the [hook-manager registry](../hook-manager/registry.json) its host-only home (the contract's home rule). See [`docs/setup/secure-agent-setup.md` → *Whole-user with the per-repo dispatcher*](../../docs/setup/secure-agent-setup.md#whole-user-with-the-per-repo-dispatcher). |
++| [`hook-manager-shim.sh`](hook-manager-shim.sh) | Transparent front for a git-hook manager, installed as `~/.claude/bin/<tool>` (with `~/.claude/bin` prepended to PATH) for the whole-user dispatcher flavour, one install per adapter in the [hook-manager registry](../hook-manager/registry.json) whose install strategy is `git-dir-flag` (`prek` today; Husky uses SessionStart relocation). The tool is the name it is installed under. Rewrites **only** the adapter's install subcommand so the hook lands in the repo-local `.git/hooks/` where the dispatcher chains, instead of the shared `core.hooksPath` dir — for prek, injecting `--git-dir "$(git rev-parse --git-common-dir)"` unless the caller already passed `--git-dir`, asked for `--help`, or is outside a git work tree. Every other invocation passes through unchanged; no-op on hosts with no global `core.hooksPath`. Implements the install-target rule of the [hook-manager contract](../hook-manager/README.md). |
+ 
+ ## Usage at a glance
+ 
+diff --git a/tools/agent-isolation/git-hook-dispatcher.sh b/tools/agent-isolation/git-hook-dispatcher.sh
+index 11fa36a61..2a86d2cbf 100755
+--- a/tools/agent-isolation/git-hook-dispatcher.sh
++++ b/tools/agent-isolation/git-hook-dispatcher.sh
+@@ -44,7 +44,8 @@
+ # This dispatcher restores per-repo behaviour: for every git
+ # operation it (1) runs the framework's own logic for that hook
+ # type, then (2) **chains through to the repo-local
+-# `.git/hooks/<hook-name>`** if the current repo has one. So a repo
++# `.git/hooks/<hook-name>`** if the current repo has one, or the real
++# `.husky/_/<hook-name>` when SessionStart saved Husky's path. So a repo
+ # can keep using prek, husky, lefthook, or a hand-written hook in
+ # its own `.git/hooks/` — installed there via, e.g.,
+ # `prek install --git-dir "$(git rev-parse --git-common-dir)"`
+@@ -102,6 +103,200 @@ case "$common" in
+ esac
+ local_hook="$common/hooks/$hook"
+ 
++
++resolve_husky() {
++# A session start relocates Husky's exact core.hooksPath here. Preserve the
++# final newline while reading: command substitution alone would hide an empty
++# second value. --get-all also sees duplicates from a worktree/global config.
++saved="$(git config --local --get-all magpie.localHooksPath 2>/dev/null; _rc=$?; printf '\001%d' "$_rc")"
++saved_status="${saved##*$'\001'}"
++saved="${saved%$'\001'*}"
++scopes="$(git config --show-scope --get-all magpie.localHooksPath 2>/dev/null; _rc=$?; printf '\001%d' "$_rc")"
++scope_status="${scopes##*$'\001'}"
++scopes="${scopes%$'\001'*}"
++case "$saved_status" in
++  1)
++    if [ "$scope_status" != 1 ]; then
++      echo 'Magpie: refusing a saved Husky path outside repository-local config.' >&2
++      return 1
++    fi
++    : ;; # no saved key: the existing .git/hooks behavior
++  0)
++    if [ "$saved" != $'.husky/_\n' ] || [ "$scope_status" != 0 ] || [ "$scopes" != $'local\t.husky/_\n' ]; then
++      echo 'Magpie: refusing an ambiguous or unsupported saved Husky hook path.' >&2
++      return 1
++    fi
++    if [ "$(git config --bool extensions.worktreeConfig 2>/dev/null || true)" = true ]; then
++      echo 'Magpie: Husky chaining does not support config.worktree.' >&2
++      return 1
++    fi
++    toplevel="$(git rev-parse --show-toplevel)" || return 1
++    local_hook="$toplevel/.husky/_/$hook"
++    # Resolve missing paths too: a sandbox-writable parent can acquire init.sh
++    # after this invocation. Python is already a prerequisite of secure setup.
++    if ! python3 - "$toplevel" "$local_hook" "$0" <<'HUSKY_PATH_CHECK'
++import json
++import os
++import re
++import subprocess
++import sys
++from pathlib import Path
++
++
++def check():
++    root = Path(sys.argv[1]).resolve(strict=True)
++    hook = Path(sys.argv[2]).resolve()
++    hook.relative_to(root)
++    # Do not follow a wrapper back into the dispatcher itself.
++    if hook == Path(sys.argv[3]).resolve():
++        raise ValueError('dispatcher loop')
++    if os.environ.get('SANDBOX_RUNTIME') or not os.access(hook, os.X_OK):
++        return
++    home = Path(os.environ['HOME'])
++    config = Path(os.environ.get('XDG_CONFIG_HOME') or home / '.config')
++    if not config.is_absolute():
++        raise ValueError('relative config home')
++    init = config / 'husky' / 'init.sh'
++    # resolve() follows the deepest existing ancestor even for a missing file.
++    candidates = (Path(os.path.abspath(init)), init.resolve())
++    writable = [root, home / '.cache', Path('/tmp'), Path('/private/tmp'),
++                Path('/var/tmp'), Path('/private/var/tmp'), Path('/var/folders'),
++                Path('/private/var/folders')]
++    if os.environ.get('TMPDIR'):
++        writable.append(Path(os.environ['TMPDIR']))
++    worktrees = subprocess.run(
++        ['git', 'worktree', 'list', '--porcelain', '-z'], capture_output=True, timeout=5, check=True,
++    )
++    worktree_roots = []
++    for field in worktrees.stdout.split(b'\0'):
++        if field.startswith(b'worktree '):
++            directory_text = field.partition(b' ')[2]
++            directory = Path(os.fsdecode(directory_text))
++            writable.append(directory)
++            worktree_roots.append(directory)
++    user = Path(os.environ.get('CLAUDE_CONFIG_DIR') or home / '.claude')
++    # Documented file-based managed sources only; never inspect private
++    # server caches, MDM preferences or session state to infer effective policy.
++    managed_files = []
++    if sys.platform == 'darwin':
++        managed_directories = [Path('/Library/Application Support/ClaudeCode')]
++    elif sys.platform.startswith('linux'):
++        managed_directories = [Path('/etc/claude-code')]
++    else:
++        raise ValueError('unsupported host settings platform')
++    for directory in managed_directories:
++        managed_files.append(directory / 'managed-settings.json')
++        try:
++            entries = sorted((directory / 'managed-settings.d').iterdir())
++        except FileNotFoundError:
++            entries = []
++        if len(entries) > 128:
++            raise ValueError('too many managed settings files')
++        managed_files.extend(p for p in entries if not p.name.startswith('.') and p.name.endswith('.json'))
++    settings = [(user / 'settings.json', user)] + [(filename, root) for filename in managed_files]
++    for directory in set(worktree_roots + [root]):
++        settings.extend(((directory / '.claude/settings.json', directory),
++                         (directory / '.claude/settings.local.json', directory)))
++
++    def pairs(items):
++        result = {}
++        for key, value in items:
++            if key in result:
++                raise ValueError('duplicate settings key')
++            result[key] = value
++        return result
++
++    def paths(entries, base, kind='filesystem'):
++        if not isinstance(entries, list):
++            raise ValueError('unknown write grant')
++        for entry in entries:
++            if not isinstance(entry, str) or not entry:
++                raise ValueError('unknown write path')
++            if entry.endswith('/**'):
++                entry = entry[:-3]
++            if not entry or any(c in entry for c in '*?[]{}\x00\n\r'):
++                raise ValueError('unknown write path')
++            if entry == '~' or entry.startswith('~/'):
++                path = Path(str(home) + entry[1:])
++            elif kind == 'edit' and entry.startswith('//'):
++                path = Path(entry[1:])
++            elif kind == 'edit' and entry.startswith('/'):
++                if is_managed or '..' in Path(entry).parts:
++                    raise ValueError('indeterminate relative edit anchor')
++                path = base / entry.lstrip('/')
++            else:
++                path = Path(entry)
++                if not path.is_absolute():
++                    if kind == 'additional':
++                        raise ValueError('relative additional directory needs an absolute spelling')
++                    if kind == 'edit' and '..' in path.parts:
++                        raise ValueError('relative edit parent traversal')
++                    path = (Path.cwd() if kind == 'edit' else base) / path
++            writable.extend((Path(os.path.abspath(path)), path.resolve()))
++
++    total_settings_bytes = 0
++    for filename, base in settings:
++        is_managed = filename in managed_files
++        try:
++            with filename.open(encoding='utf-8') as handle:
++                text = handle.read(1024 * 1024 + 1)
++        except FileNotFoundError:
++            continue
++        total_settings_bytes += len(text.encode('utf-8'))
++        if len(text) > 1024 * 1024 or total_settings_bytes > 8 * 1024 * 1024:
++            raise ValueError('settings too large')
++        data = json.loads(text, object_pairs_hook=pairs)
++        fs = data.get('sandbox', {}).get('filesystem', {})
++        if fs.get('disabled') is True:
++            raise ValueError('filesystem sandbox is disabled')
++        permissions = data.get('permissions', {})
++        paths(fs.get('allowWrite', []), base)
++        paths(permissions.get('additionalDirectories', []), base, 'additional')
++        rules = permissions.get('allow', [])
++        if not isinstance(rules, list):
++            raise ValueError('unknown edit grants')
++        for rule in rules:
++            if not isinstance(rule, str):
++                raise ValueError('unknown edit grant')
++            if rule in ('Edit', 'Write', 'MultiEdit'):
++                raise ValueError('unbounded edit grant')
++            match = re.fullmatch(r'(?:Edit|Write|MultiEdit)\((.*)\)', rule)
++            if match:
++                entry = match.group(1)
++                if entry.endswith('/**'):
++                    entry = entry[:-3]
++                paths([entry], base, 'edit')
++    for path in candidates:
++        for grant in writable:
++            for parent in (Path(os.path.abspath(grant)), grant.resolve()):
++                if path == parent or parent in path.parents:
++                    raise ValueError('sandbox-writable init location')
++
++
++try:
++    check()
++except (OSError, RuntimeError, ValueError, TypeError, AttributeError, KeyError, subprocess.SubprocessError):
++    sys.exit(1)
++HUSKY_PATH_CHECK
++    then
++      echo 'Magpie: refusing unsafe Husky hook/init.sh paths or indeterminate write grants.' >&2
++      return 1
++    fi
++    ;;
++  *)
++    echo 'Magpie: could not read the saved Husky hook configuration.' >&2
++    return 1
++    ;;
++esac
++
++}
++
++husky_refused=0
++if ! resolve_husky; then
++  husky_refused=1
++  local_hook=""
++fi
++
+ # Guard against chaining into ourselves (defensive; core.hooksPath is a
+ # different dir from .git/hooks, but symlink layouts can surprise).
+ self_canon="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+@@ -154,6 +349,9 @@ fi
+ 
+ # --- non-post-checkout: exec local for a perfect passthrough ---------------
+ if [ "$hook" != "post-checkout" ]; then
++  if [ "$husky_refused" = 1 ]; then
++    exit 1
++  fi
+   if [ "$has_local" = 1 ]; then
+     exec "$local_hook" "$@"
+   fi
+diff --git a/tools/agent-isolation/tests/test_git_hook_dispatcher.py b/tools/agent-isolation/tests/test_git_hook_dispatcher.py
+index b5acee0dc..08477788f 100644
+--- a/tools/agent-isolation/tests/test_git_hook_dispatcher.py
++++ b/tools/agent-isolation/tests/test_git_hook_dispatcher.py
+@@ -127,3 +127,260 @@ def test_a_repository_without_a_detected_manager_still_gets_the_host_home(
+     repo, hook, seen = _repo_with_local_hook(tmp_path, config=None)
+     _run(repo, hook, {"PREK_HOME": "~/.cache/prek-sandbox"})
+     assert seen.read_text() == HOST_HOME.format(home=os.environ["HOME"])
++
++
++
++def _husky_hook(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
++    repo, hook, seen = _repo_with_local_hook(tmp_path)
++    home = tmp_path / "home"
++    home.mkdir()
++    local = repo / ".husky" / "_" / "pre-commit"
++    local.parent.mkdir(parents=True)
++    local.write_text('#!/bin/sh\nprintf "%s" "$*" > "$HUSKY_SEEN"\ncat >> "$HUSKY_SEEN"\nexit "${HOOK_STATUS:-0}"\n')
++    local.chmod(0o755)
++    subprocess.run(["git", "-C", str(repo), "config", "magpie.localHooksPath", ".husky/_"], check=True)
++    return repo, hook, seen, home
++
++
++def _run_husky(
++    repo: Path, hook: Path, seen: Path, home: Path, **extra: str
++) -> subprocess.CompletedProcess[str]:
++    env = {k: v for k, v in os.environ.items() if k not in (
++        "SANDBOX_RUNTIME", "XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "GIT_CONFIG_COUNT",
++        "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
++    )}
++    env.update(HOME=str(home), HUSKY_SEEN=str(seen), SANDBOX_RUNTIME="1")
++    env.update(extra)
++    return subprocess.run(["bash", str(hook), "first", "two words"], cwd=repo, env=env,
++                          input="stdin payload", capture_output=True, text=True, check=False)
++
++
++def test_saved_husky_path_preserves_argv_stdin_and_exit_status(tmp_path: Path) -> None:
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    done = _run_husky(repo, hook, seen, home, HOOK_STATUS="7")
++    assert done.returncode == 7
++    assert seen.read_text() == "first two wordsstdin payload"
++    # The ordinary .git/hooks hook was not also chained.
++    assert not Path(f"{seen}.xdg").exists()
++
++
++@pytest.mark.parametrize("value", ["", "other", ".husky/_", ".husky/_\n"])
++def test_duplicate_saved_husky_keys_are_refused_even_if_empty(tmp_path: Path, value: str) -> None:
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    subprocess.run(["git", "-C", str(repo), "config", "--add", "magpie.localHooksPath", value], check=True)
++    done = _run_husky(repo, hook, seen, home)
++    assert done.returncode != 0
++    assert "ambiguous or unsupported" in done.stderr
++    assert not seen.exists()
++
++
++def test_husky_missing_hook_is_a_no_op_without_git_hooks_fallback(tmp_path: Path) -> None:
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    (repo / ".husky" / "_" / "pre-commit").unlink()
++    assert _run_husky(repo, hook, seen, home).returncode == 0
++    assert not seen.exists()
++
++
++@pytest.mark.parametrize("kind", ["escape", "loop", "self"])
++def test_husky_wrapper_cannot_escape_or_loop(tmp_path: Path, kind: str) -> None:
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    local = repo / ".husky" / "_" / "pre-commit"
++    local.unlink()
++    target = tmp_path / "elsewhere" if kind == "escape" else local if kind == "loop" else hook
++    if kind == "escape":
++        target.write_text('#!/bin/sh\necho unsafe > "$HUSKY_SEEN"\n')
++        target.chmod(0o755)
++    local.symlink_to(target)
++    done = _run_husky(repo, hook, seen, home)
++    assert done.returncode != 0
++    assert not seen.exists()
++
++
++@pytest.mark.parametrize("present", [False, True])
++@pytest.mark.parametrize("kind", ["cache", "explicit", "directory-link", "file-link", "invalid-grant"])
++def test_host_husky_init_is_refused_for_writable_or_unknown_locations(
++    tmp_path: Path, present: bool, kind: str
++) -> None:
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    config = home / ".config"
++    extra = {"SANDBOX_RUNTIME": ""}
++    if kind == "cache":
++        config = home / ".cache" / "config"
++        extra["XDG_CONFIG_HOME"] = str(config)
++    elif kind in ("explicit", "invalid-grant"):
++        import json
++        (home / ".claude").mkdir()
++        grant = str(config) if kind == "explicit" else {"unknown": "form"}
++        (home / ".claude" / "settings.json").write_text(
++            json.dumps({"sandbox": {"filesystem": {"allowWrite": [grant]}}})
++        )
++    init = config / "husky" / "init.sh"
++    if kind == "directory-link":
++        (repo / "untrusted-init").mkdir()
++        config.mkdir()
++        (config / "husky").symlink_to(repo / "untrusted-init")
++    elif kind == "file-link":
++        init.parent.mkdir(parents=True)
++        (repo / "untrusted-init").write_text(":" if present else "")
++        if not present:
++            (repo / "untrusted-init").unlink()
++        init.symlink_to(repo / "untrusted-init")
++    if present and kind != "file-link":
++        init.parent.mkdir(parents=True, exist_ok=True)
++        init.write_text(":\n")
++    done = _run_husky(repo, hook, seen, home, **extra)
++    assert done.returncode != 0
++    assert "unsafe Husky" in done.stderr
++    assert not seen.exists()
++    # Sandboxed hooks keep their existing behavior, including init handling.
++    assert _run_husky(repo, hook, seen, home).returncode == 0
++
++
++@pytest.mark.parametrize("present", [False, True])
++def test_default_husky_init_respects_the_implicit_temporary_write_roots(
++    tmp_path: Path, present: bool
++) -> None:
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    init = home / ".config" / "husky" / "init.sh"
++    if present:
++        init.parent.mkdir(parents=True)
++        init.write_text(":\n")
++    done = _run_husky(repo, hook, seen, home, SANDBOX_RUNTIME="")
++    # An artificial HOME under /tmp is genuinely sandbox-writable. The full
++    # Docker integration lane uses a separate /fixtures basetemp, outside the
++    # implicit temporary roots, to exercise the positive host-default case.
++    implicit = ("/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp", "/var/folders", "/private/var/folders")
++    unsafe_home = any(home.resolve() == Path(p) or Path(p) in home.resolve().parents for p in implicit)
++    assert done.returncode == (1 if unsafe_home else 0)
++    assert seen.exists() is not unsafe_home
++
++
++
++@pytest.mark.parametrize("scope", ["global", "command"])
++def test_saved_husky_key_must_be_repository_local(tmp_path: Path, scope: str) -> None:
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    subprocess.run(["git", "-C", str(repo), "config", "--unset", "magpie.localHooksPath"], check=True)
++    extra = {}
++    if scope == "global":
++        (home / ".gitconfig").write_text("[magpie]\nlocalHooksPath = .husky/_\n")
++    else:
++        extra = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "magpie.localHooksPath", "GIT_CONFIG_VALUE_0": ".husky/_"}
++    assert _run_husky(repo, hook, seen, home, **extra).returncode != 0
++    assert not seen.exists()
++
++
++def test_refused_husky_post_checkout_still_runs_framework(tmp_path: Path) -> None:
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    subprocess.run(["git", "-C", str(repo), "config", "--add", "magpie.localHooksPath", ""], check=True)
++    (repo / ".claude").mkdir()
++    scripts = home / ".claude/scripts"
++    scripts.mkdir(parents=True)
++    sync = scripts / "sandbox-add-project-root.sh"
++    sync.write_text('#!/bin/sh\nprintf framework > "$HUSKY_SEEN"\n')
++    sync.chmod(0o755)
++    post = hook.parent / "post-checkout"
++    post.symlink_to(DISPATCHER)
++    done = _run_husky(repo, post, seen, home)
++    assert done.returncode == 0
++    assert "ambiguous or unsupported" in done.stderr
++    assert seen.read_text() == "framework"
++
++
++@pytest.mark.parametrize("kind", ["single-slash", "double-slash", "home", "user-filesystem"])
++@pytest.mark.parametrize("present", [False, True])
++def test_host_init_grants_use_each_fields_path_prefix_rules(
++    tmp_path: Path, kind: str, present: bool,
++) -> None:
++    import json
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    config = home / ".config"
++    if kind == "user-filesystem":
++        directory = home / ".claude"
++        data = {"sandbox": {"filesystem": {"allowWrite": ["../.config"]}}}
++    else:
++        directory = repo / ".claude"
++        rule = {"single-slash": "Edit(/../home/.config/**)",
++                "double-slash": "Edit(/" + str(config) + "/**)",
++                "home": "Edit(~/**)"}[kind]
++        data = {"permissions": {"allow": [rule]}}
++    directory.mkdir()
++    (directory / "settings.json").write_text(json.dumps(data))
++    if present:
++        init = config / "husky/init.sh"
++        init.parent.mkdir(parents=True)
++        init.write_text(":\n")
++    assert _run_husky(repo, hook, seen, home, SANDBOX_RUNTIME="").returncode != 0
++    assert not seen.exists()
++
++
++def test_host_init_checks_grants_from_the_other_worktrees(tmp_path: Path) -> None:
++    import json
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
++                    "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null",
++                    "commit", "--allow-empty", "-qm", "initial"], check=True)
++    linked = tmp_path / "linked"
++    subprocess.run(["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null",
++                    "worktree", "add", "-qb", "linked", str(linked)], check=True)
++    (linked / ".claude").mkdir()
++    (linked / ".claude/settings.local.json").write_text(json.dumps({
++        "sandbox": {"filesystem": {"allowWrite": [str(home / ".config")]}}
++    }))
++    assert _run_husky(repo, hook, seen, home, SANDBOX_RUNTIME="").returncode != 0
++    assert not seen.exists()
++
++
++
++@pytest.mark.parametrize("kind", ["user-single-slash", "relative-edit-parent", "relative-additional"])
++def test_indeterminate_or_user_anchored_grants_are_not_treated_as_host_safe(
++    tmp_path: Path, kind: str,
++) -> None:
++    import json
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    settings_dir = home / ".claude"
++    settings_dir.mkdir()
++    extra = {"SANDBOX_RUNTIME": ""}
++    if kind == "user-single-slash":
++        extra["XDG_CONFIG_HOME"] = str(settings_dir / "config")
++        data = {"permissions": {"allow": ["Edit(/config/**)"]}}
++    elif kind == "relative-edit-parent":
++        data = {"permissions": {"allow": ["Edit(../home/.config/**)"]}}
++    else:
++        data = {"permissions": {"additionalDirectories": ["../home/.config"]}}
++    (settings_dir / "settings.json").write_text(json.dumps(data))
++    assert _run_husky(repo, hook, seen, home, **extra).returncode != 0
++    assert not seen.exists()
++
++
++def test_managed_source_relative_edit_anchor_fails_closed(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    # Unit-test the unmodified embedded guard with only the fixed system JSON
++    # read substituted; native Git and all real-Husky integration stay real.
++    import io
++    import sys
++    from typing import Any
++    repo, hook, seen, home = _husky_hook(tmp_path)
++    monkeypatch.chdir(repo)
++    monkeypatch.setenv("HOME", str(home))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
++    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / ".claude"))
++    monkeypatch.delenv("SANDBOX_RUNTIME", raising=False)
++    monkeypatch.setattr(sys, "argv", ["guard", str(repo), str(repo / ".husky/_/pre-commit"), str(DISPATCHER)])
++    managed_path = Path("/Library/Application Support/ClaudeCode/managed-settings.json") if sys.platform == "darwin" else Path("/etc/claude-code/managed-settings.json")
++    original_open = Path.open
++    reads = []
++    def managed_json(path: Path, *args: Any, **kwargs: Any) -> Any:
++        if path == managed_path:
++            reads.append(path)
++            return io.StringIO('{"permissions":{"allow":["Edit(/config/**)"]}}')
++        return original_open(path, *args, **kwargs)
++    monkeypatch.setattr(Path, "open", managed_json)
++    text = DISPATCHER.read_text().split("<<'HUSKY_PATH_CHECK'\n", 1)[1].split("\nHUSKY_PATH_CHECK", 1)[0]
++    definitions = text.rsplit("\ntry:\n    check()", 1)[0]
++    namespace: dict[str, Any] = {}
++    exec(compile(definitions, "dispatcher guard", "exec"), namespace)
++    with pytest.raises(ValueError, match="indeterminate relative edit anchor"):
++        namespace["check"]()
++    assert reads == [managed_path]
++    assert not seen.exists()
+diff --git a/tools/dev/sync-hook-managers.py b/tools/dev/sync-hook-managers.py
+index 63f15fa2d..ac209ff84 100755
+--- a/tools/dev/sync-hook-managers.py
++++ b/tools/dev/sync-hook-managers.py
+@@ -53,8 +53,8 @@ DISPATCHER = Path("tools/agent-isolation/git-hook-dispatcher.sh")
+ SANDBOX_LINT = Path("tools/sandbox-lint/src/sandbox_lint/__init__.py")
+ SETTINGS = (Path(".claude/settings.json"), Path("tools/sandbox-lint/expected.json"))
+ 
+-#: Install strategies the shim implements. A new one lands with its shim branch.
+-STRATEGIES = {"git-dir-flag", "none"}
++#: Install strategies implemented by the shim or SessionStart reconciliation.
++STRATEGIES = {"git-dir-flag", "session-start-relocation", "none"}
+ 
+ _NAME = re.compile(r"^[a-z][a-z0-9-]*$")
+ _ENV = re.compile(r"^[A-Z][A-Z0-9_]*$")
+@@ -108,10 +108,22 @@ def validate(registry: dict[str, Any]) -> list[str]:
+             strategy = install.get("strategy")
+             if strategy not in STRATEGIES:
+                 errors.append(
+-                    f"{where}.install.strategy: {strategy!r} is not one the shim implements "
++                    f"{where}.install.strategy: {strategy!r} is not a supported install strategy "
+                     f"({', '.join(sorted(STRATEGIES))})"
+                 )
+-            if strategy != "none":
++            if strategy == "session-start-relocation":
++                if install != {
++                    "strategy": "session-start-relocation",
++                    "path": ".husky/_",
++                    "saved_key": "magpie.localHooksPath",
++                } or name != "husky":
++                    errors.append(f"{where}.install: only the exact Husky relocation is supported")
++                if not isinstance(detect, dict) or (
++                    detect.get("config_directories") != [".husky"]
++                    or detect.get("dev_dependency") != "husky"
++                ):
++                    errors.append(f"{where}.detect: Husky needs .husky directory/devDependency detection")
++            elif strategy != "none":
+                 if not isinstance(install.get("subcommand"), str) or not _NAME.match(install["subcommand"]):
+                     errors.append(f"{where}.install.subcommand: missing")
+                 if strategy == "git-dir-flag" and not (
+@@ -158,7 +170,7 @@ def render(registry: dict[str, Any]) -> dict[Path, str]:
+     cases = []
+     for name, adapter in sorted(adapters.items()):
+         install = adapter["install"]
+-        if install.get("strategy") == "none":
++        if install.get("strategy") in ("none", "session-start-relocation"):
+             continue
+         fields = [f"install_subcommand={install['subcommand']}", f"install_strategy={install['strategy']}"]
+         if "flag" in install:
+@@ -200,6 +212,8 @@ def check_settings(registry: dict[str, Any], root: Path) -> list[str]:
+         settings = json.loads((root / rel).read_text(encoding="utf-8"))
+         env = settings.get("env") or {}
+         deny = (settings.get("permissions") or {}).get("deny") or []
++        if "husky" in registry["adapters"] and "Edit(~/.config/husky/**)" not in deny:
++            errors.append(f"{rel}: permissions.deny must protect Husky's default init directory")
+         for name, adapter in sorted(registry["adapters"].items()):
+             home = adapter.get("home")
+             if not home:
+diff --git a/tools/dev/tests/test_sync_hook_managers.py b/tools/dev/tests/test_sync_hook_managers.py
+index d761d4281..1649e2147 100644
+--- a/tools/dev/tests/test_sync_hook_managers.py
++++ b/tools/dev/tests/test_sync_hook_managers.py
+@@ -204,3 +204,47 @@ def test_none_strategy_generates_no_shim_case(registry: dict[str, Any]) -> None:
+     for name, adapter in registry["adapters"].items():
+         if adapter["install"]["strategy"] == "none":
+             assert f"{name})" not in shim_body
++
++
++def test_husky_session_start_strategy_does_not_generate_an_install_shim(
++    registry: dict[str, Any],
++) -> None:
++    assert mod.validate(registry) == []
++    adapter = registry["adapters"]["husky"]
++    assert adapter["detect"]["config_files"] == []  # package.json alone is not detection
++    assert adapter["detect"]["config_directories"] == [".husky"]
++    assert adapter["detect"]["dev_dependency"] == "husky"
++    assert "    husky)" not in mod.render(registry)[mod.SHIM]
++
++
++@pytest.mark.parametrize("key,value", [
++    ("path", "/tmp/hooks"), ("path", ".husky"),
++    ("saved_key", "core.hooksPath"), ("flag", "--git-dir"),
++])
++def test_husky_relocation_rejects_unsupported_install_contracts(
++    registry: dict[str, Any], key: str, value: str,
++) -> None:
++    broken = copy.deepcopy(registry)
++    broken["adapters"]["husky"]["install"][key] = value
++    assert any("exact Husky relocation" in error for error in mod.validate(broken))
++
++
++@pytest.mark.parametrize("detect", [None, {}, {"config_directories": ["other"]}])
++def test_husky_detection_metadata_cannot_silently_become_package_json_only(
++    registry: dict[str, Any], detect: object,
++) -> None:
++    broken = copy.deepcopy(registry)
++    broken["adapters"]["husky"]["detect"] = detect
++    assert mod.validate(broken)
++
++
++def test_husky_default_init_deny_is_required_in_both_committed_settings(
++    tree: Path, registry: dict[str, Any],
++) -> None:
++    for rel in mod.SETTINGS:
++        path = tree / rel
++        data = json.loads(path.read_text())
++        data["permissions"]["deny"].remove("Edit(~/.config/husky/**)")
++        path.write_text(json.dumps(data))
++    errors = mod.check_settings(registry, tree)
++    assert sum("Husky's default init directory" in error for error in errors) == len(mod.SETTINGS)
+diff --git a/tools/hook-manager/README.md b/tools/hook-manager/README.md
+index 0414e1e96..568abd928 100644
+--- a/tools/hook-manager/README.md
++++ b/tools/hook-manager/README.md
+@@ -69,8 +69,9 @@ The fix is an **install strategy**, applied by [`hook-manager-shim.sh`](../agent
+ The shim takes the tool from the name it is installed under, rewrites only the install subcommand, and passes every other invocation through unchanged.
+ It leaves the install alone when the caller already chose a target, asked for help, or is not in a git work tree.
+ 
+-| Strategy | What the shim does | Status |
++| Strategy | Reconciliation | Status |
+ |---|---|---|
++| `session-start-relocation` | SessionStart moves the exact Husky `.husky/_` override to `magpie.localHooksPath`; the dispatcher executes the actual worktree-local wrapper. No PATH shim. | implemented; validation pending |
+ | `git-dir-flag` | Inserts `<flag> <common dir>` after the install subcommand (prek: `--git-dir`; prek refuses a bare install while a global `core.hooksPath` is set). | implemented |
+ | `hide-global-config` | Runs the install with `GIT_CONFIG_GLOBAL=/dev/null`, for a manager that writes to the common dir but refuses while a global `core.hooksPath` is set (pre-commit, lefthook). | planned |
+ | `hooks-path-env` | Runs the install with `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=core.hooksPath`, `GIT_CONFIG_VALUE_0=<common dir>/hooks`, for a manager that writes into whatever `core.hooksPath` names (overcommit, CaptainHook). The value must be that absolute path: git treats an empty `core.hooksPath` as set, and hooks then resolve against the filesystem root. | planned |
+@@ -101,12 +102,16 @@ A repository **uses** a hook manager when any of these holds:
+ 2. For a manager with nested project configs (prek's workspace mode), one of its config files is tracked anywhere below the root (`git ls-files ':(glob)**/<name>'`). An untracked nested file does not count.
+ 3. One of the repository's installed hooks (`$(git rev-parse --git-common-dir)/hooks/*`, samples aside) contains the manager's hook marker. This covers an install with a custom config path (`prek install --config ci/hooks.yaml` leaves no standard file name behind) and one made from a nested project.
+ 
++For Husky, detection metadata also names a root `.husky` directory or an actual
++`husky` key in package.json devDependencies. An unrelated package.json does not
++establish Husky use. SessionStart reconciles the installed exact hooks path.
++
+ Detection decides what the setup configures *for a repository*; it never decides a per-user protection, since a manager's default and host homes are shared by every repository on the host, and a hook can reach a manager detection does not see (through a script):
+ 
+ | Integration | Scope | Rule |
+ |---|---|---|
+ | Sandbox home (`env.<var>`) | per repository | `sandbox-lint` (`uses_hook_manager`) requires it only for a project that uses the manager; with no project to look at, every manager counts. A project without it is still safe: its sandboxed runs of the manager fail on the denied default home. The generator checks the framework's own settings the same way, from the root config files. |
+-| Shim | per host, for the repositories the operator works in | `setup-isolated-setup-install` installs `~/.claude/bin/<tool>` only when such a repository uses the manager, and only for adapters with an install strategy other than `none` (managers requiring no install fix need no shim). |
++| Shim | per host, for the repositories the operator works in | `setup-isolated-setup-install` installs `~/.claude/bin/<tool>` only when such a repository uses the manager, and only for adapters with the `git-dir-flag` strategy (Husky instead reconciles at SessionStart). |
+ | Verify check 19d | per repository | **n/a** for a project that does not use prek. |
+ | Default-home deny (`Edit(<default>/**)`) | per user | Always, for every registered manager: another repository's terminal commits run from that home. |
+ | Host home (dispatcher) | per user | Always, outside the sandbox, for every registered manager: an unused variable is harmless, a missed detection would let a bypassed command inherit the sandbox home. |
+@@ -123,10 +128,13 @@ The two YAML names are shared with pre-commit, so a repository with one uses bot
+ | `language` | The ecosystem the manager comes from (for the reader, not the implementation). |
+ | `upstream` | The manager's source repository. |
+ | `detect.config_files` | The config file names that say a repository uses it (bare names, no directories). |
++| `detect.config_directories` | Optional root directory names; Husky uses `.husky`. |
++| `detect.dev_dependency` | Optional key in root package.json devDependencies; Husky uses `husky`, not every package.json. |
+ | `detect.nested` | Whether a tracked config below the root counts (rule 2 of [Detection](#detection)). |
+ | `detect.hook_marker` | Text every hook the manager installs contains (rule 3). |
+ | `install.subcommand` | The subcommand the shim rewrites. |
+ | `install.strategy` | One of the install strategies above. |
++| `install.path`, `install.saved_key` | For session-start relocation: exact supported path `.husky/_` and repository-local `magpie.localHooksPath`. |
+ | `install.flag` | For `git-dir-flag`: the long option that takes the git directory. |
+ | `home` | Omitted for a manager that keeps nothing outside the repository. |
+ | `home.env` | The environment variable that relocates the home. |
+@@ -175,6 +183,7 @@ What a repository or an operator configures is where each manager's environments
+ | `cargo-husky` | Rust | `none`; detected by a hook mentioning `cargo-husky` | none (no external home) | shipping (in linked worktrees `build.rs` skips hook install: searches for a `.git` directory) |
+ | `git-build-hook` | Java | `none`; detected by `pom.xml` (nested too) or a hook mentioning `git-build-hook` | none (no external home) | shipping (JGit `getGitDir()` targets `<worktree>/hooks` in linked worktrees; `configure` goal can set repo-local `core.hooksPath`) |
+ | `git-code-format-maven-plugin` | Java | `none`; detected by `pom.xml` (nested too) or a hook mentioning `git-code-format-maven-plugin` | none (no external home) | shipping (JGit `getCommonDirectory()` targets common hooks dir, coexisting cleanly in linked worktrees) |
++| `husky` | JavaScript | `session-start-relocation`; `.husky` directory or `husky` devDependency, hook marker `.husky` | no cache; host init.sh path guard | implemented; validation pending |
+ | `prek` | Rust | `git-dir-flag` (`--git-dir`); detected by `prek.toml`, `.pre-commit-config.yaml` or `.pre-commit-config.yml` (nested too) or a hook mentioning `prek` | `PREK_HOME`: `~/.cache/prek` → sandbox `~/.cache/prek-sandbox`, host `~/.local/share/prek-host` | shipping |
+ | `simple-git-hooks` | JavaScript | `none`; detected by `package.json`, `.simple-git-hooks.{js,cjs,json}`, `simple-git-hooks.{js,cjs,json}` or a hook mentioning `simple-git-hooks` | none (no external home) | shipping |
+ 
+@@ -220,3 +229,87 @@ What a repository or an operator configures is where each manager's environments
+ 
+ - [`setup-isolated-setup-install`](../../plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md) Step P.3b-whole-user installs the shim once per adapter the operator uses.
+ - [`setup-isolated-setup-verify`](../../plugins/magpie-setup/skills/isolated-setup-verify/SKILL.md) check 19 and [`setup-isolated-setup-update`](../../plugins/magpie-setup/skills/isolated-setup-update/SKILL.md) check the homes through `sandbox-lint`.
++
++
++## Husky: session-start relocation
++
++The `husky` adapter uses **session-start-relocation**, rather than a PATH
++shim: npm can invoke Husky's local binary directly. Detection metadata names
++the `.husky` directory and the `husky` development dependency; an unrelated
++`package.json` alone does not establish Husky use. The supported path is exactly
++`.husky/_` (Husky 9). Custom installation directories are reported, not rewritten.
++
++With the whole-user dispatcher enabled, SessionStart in a main checkout moves
++the repository's plain `core.hooksPath = .husky/_` to the single repository-local
++`magpie.localHooksPath` key in one atomic config rewrite. The dispatcher then
++runs the actual `<worktree>/.husky/_/<hook-name>` wrapper, preserving arguments,
++standard input and the hook's failure status. This saved path replaces the
++ordinary `.git/hooks` lookup, matching Git's single hooks-directory semantics.
++The framework's post-checkout synchronization still runs first.
++
++An npm install **during the session** can restore `core.hooksPath`, bypassing
++the dispatcher until the next SessionStart. Husky's checks still run in that
++window, but the dispatcher's host-only cache selection and post-checkout
++synchronization do not. Start a new session after an install before relying on
++those protections. This adapter does not intercept every npm or Git command.
++
++Main-checkout reconciliation prepares the shared config for linked worktrees;
++each linked worktree resolves its own `.husky/_` directory. A session started
++only in a linked worktree never writes through its sandbox-writable `.git`
++pointer: inspect hooks paths and start a session in the main checkout first.
++`extensions.worktreeConfig`/`config.worktree`, custom paths, duplicate saved
++keys and unparseable/included configurations are unsupported and reported.
++
++Outside the sandbox, Husky's `init.sh` must be protected from sandbox writes.
++The dispatcher checks the lexical path and resolved existing ancestors even
++when the file is missing. It considers user, project, local and managed
++settings, worktrees, cache and temporary roots; unknown write-grant syntax
++fails closed. A missing file in a writable directory is not safe. The committed
++`Edit(~/.config/husky/**)` deny provides defense in depth, not proof that a
++custom XDG configuration directory or a broader operator grant is safe.
++Unsafe hooks/init locations are refused with a sanitized diagnostic; operator
++files and configuration are not deleted or rewritten by this check.
++Sandboxed hooks keep their existing init behavior. Husky is not disabled.
++
++Changing registry strategies or detection fields requires updating their
++validation and regression tests in `tools/dev/tests/test_sync_hook_managers.py`.
++The official sync script generates blocks; the SessionStart code and dispatcher
++implement relocation. Regenerate the setup fingerprint after changing them.
++
++
++The host init check treats `Edit` permission paths separately from filesystem
++write paths: a single leading slash in an Edit rule is settings-source-relative,
++while `//` is absolute. Filesystem write entries use ordinary absolute paths;
++user-relative entries are based at the user configuration directory. See the
++[permission path rules](https://code.claude.com/docs/en/permissions#how-path-patterns-match)
++and [sandbox path rules](https://code.claude.com/docs/en/settings-reference#sandbox-path-prefixes).
++Unknown/complex patterns fail closed. Additional-directory entries must use an
++absolute or home-relative spelling for this adapter; ambiguous relative entries
++are refused rather than guessed. Configurations supplied only through a live
++CLI/SDK override, server policy or MDM are not proven by reading the local JSON
++files; do not treat this check as proof of their effective sandbox grants.
++
++
++### Husky host-init protection boundary
++
++The host-side `init.sh` guard covers the framework's configured write grants,
++readable user settings, project/local settings for every worktree, and the
++documented managed JSON files and drop-ins. It does not reconstruct grants
++supplied only through CLI/SDK additions or non-file server/MDM policy. Operators
++who widen write access through those unsupported modes are outside this
++protection, as with the existing host-only manager-home rule. This is not a
++claim of universal effective-settings inspection.
++
++Unknown grant forms fail closed. In particular, hooks are refused while a
++relative `additionalDirectories` entry exists: spell it as an absolute or
++home-relative directory. Relative Edit paths with `..`, and source-relative
++Edit paths in managed settings whose anchor cannot be established, are refused.
++The check reads at most 1 MiB per settings file and 8 MiB in total.
++
++The committed `Edit(~/.config/husky/**)` deny is a second layer for the default
++location. Claude Code documents [deny-before-allow precedence across settings
++scopes](https://code.claude.com/docs/en/permissions#settings-precedence) and
++[conversion of Edit denies into the sandbox filesystem deny list](https://code.claude.com/docs/en/settings-reference#sandboxfilesystem).
++That protects the default path when these rules are loaded and the documented
++sandbox filesystem enforcement is enabled. It does not establish protection for
++arbitrary XDG paths, disabled filesystem isolation or unseen policy sources.
+diff --git a/tools/hook-manager/registry.json b/tools/hook-manager/registry.json
+index 8f2c5966d..262b834e5 100644
+--- a/tools/hook-manager/registry.json
++++ b/tools/hook-manager/registry.json
+@@ -41,6 +41,24 @@
+         "strategy": "none"
+       }
+     },
++    "husky": {
++      "language": "JavaScript",
++      "upstream": "https://github.com/typicode/husky",
++      "detect": {
++        "config_files": [],
++        "config_directories": [
++          ".husky"
++        ],
++        "dev_dependency": "husky",
++        "nested": false,
++        "hook_marker": ".husky"
++      },
++      "install": {
++        "strategy": "session-start-relocation",
++        "path": ".husky/_",
++        "saved_key": "magpie.localHooksPath"
++      }
++    },
+     "prek": {
+       "language": "Rust",
+       "upstream": "https://github.com/j178/prek",
+diff --git a/tools/sandbox-lint/expected.json b/tools/sandbox-lint/expected.json
+index 073420b37..ec82f634c 100644
+--- a/tools/sandbox-lint/expected.json
++++ b/tools/sandbox-lint/expected.json
+@@ -132,6 +132,7 @@
+       "WebFetch(domain:lists.apache.org)"
+     ],
+     "deny": [
++      "Edit(~/.config/husky/**)",
+       "Read(~/.aws/**)",
+       "Read(~/.ssh/**)",
+       "Read(~/.netrc)",
+diff --git a/tools/setup-preflight/tests/test_husky_integration.py b/tools/setup-preflight/tests/test_husky_integration.py
+new file mode 100644
+index 000000000..341b23ea4
+--- /dev/null
++++ b/tools/setup-preflight/tests/test_husky_integration.py
+@@ -0,0 +1,150 @@
++# Licensed to the Apache Software Foundation (ASF) under one
++# or more contributor license agreements.  See the NOTICE file
++# distributed with this work for additional information
++# regarding copyright ownership.  The ASF licenses this file
++# to you under the Apache License, Version 2.0 (the
++# "License"); you may not use this file except in compliance
++# with the License.  You may obtain a copy of the License at
++#
++#   http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing,
++# software distributed under the License is distributed on an
++# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++# KIND, either express or implied.  See the License for the
++# specific language governing permissions and limitations
++# under the License.
++
++"""Real npm/Husky integration, offline with an explicitly supplied pinned archive.
++
++Set MAGPIE_HUSKY_TARBALL to the official husky-9.1.7.tgz. The full validation
++lane supplies it after verifying its registry integrity; no test downloads it.
++Use a pytest --basetemp outside the implicit sandbox temporary-write roots to
++exercise host-default init protection with a synthetic HOME (for example a
++dedicated /fixtures tmpfs inside the validation container).
++"""
++
++from __future__ import annotations
++
++import base64
++import hashlib
++import json
++import os
++import subprocess
++from pathlib import Path
++
++import pytest
++
++from setup_preflight import isolated
++
++ROOT = Path(__file__).resolve().parents[3]
++DISPATCHER = ROOT / "tools/agent-isolation/git-hook-dispatcher.sh"
++INTEGRITY = "sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA=="
++
++
++def command(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
++    return subprocess.run(args, cwd=cwd, text=True, capture_output=True, check=check, timeout=30)
++
++
++@pytest.fixture
++def real_husky_repo(
++    tmp_path: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch,
++) -> tuple[Path, Path, Path]:
++    name = os.environ.get("MAGPIE_HUSKY_TARBALL")
++    if not name:
++        pytest.skip("real offline Husky integration requires MAGPIE_HUSKY_TARBALL")
++    archive = Path(name).resolve(strict=True)
++    raw = archive.read_bytes()
++    assert len(raw) == 2448
++    assert "sha512-" + base64.b64encode(hashlib.sha512(raw).digest()).decode() == INTEGRITY
++    for key in ("SANDBOX_RUNTIME", "PREK_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "CLAUDE_CONFIG_DIR", "HUSKY"):
++        monkeypatch.delenv(key, raising=False)
++    hooks = isolated_home / ".claude/git-hooks"
++    hooks.mkdir(parents=True)
++    for hook in ("post-checkout", "pre-commit", "pre-push"):
++        (hooks / hook).symlink_to(DISPATCHER)
++    # The session-start identity check requires the canonical source basename.
++    (hooks / "git-hook-dispatcher.sh").symlink_to(DISPATCHER)
++    (isolated_home / ".gitconfig").write_text(
++        f'[core]\n hooksPath = "{hooks}"\n[user]\n name = Test\n email = test@example.invalid\n[commit]\n gpgsign = false\n'
++    )
++    scripts = isolated_home / ".claude/scripts"
++    scripts.mkdir()
++    sync = scripts / "sandbox-add-project-root.sh"
++    sync.write_text('#!/bin/sh\nprintf framework >> "$FRAMEWORK_SEEN"\n')
++    sync.chmod(0o755)
++    repo = tmp_path / "repo"
++    command(tmp_path, "git", "init", "-q", str(repo))
++    (repo / ".claude").mkdir()
++    (repo / "package.json").write_text(json.dumps({
++        "name": "husky-integration", "version": "1.0.0", "private": True,
++        "scripts": {"prepare": "husky"},
++        "devDependencies": {"husky": "file:" + os.path.relpath(archive, repo)},
++    }))
++    (repo / ".gitignore").write_text("node_modules/\n.claude/\n")
++    command(repo, "npm", "install", "--offline", "--no-audit", "--no-fund")
++    lock = json.loads((repo / "package-lock.json").read_text())
++    assert lock["packages"]["node_modules/husky"]["integrity"] == INTEGRITY
++    # npm prepare must have run the actual package, not a simulated transport.
++    assert command(repo, "git", "config", "--get", "core.hooksPath").stdout.strip() == ".husky/_"
++    seen = tmp_path / "repo-seen"
++    framework = tmp_path / "framework-seen"
++    monkeypatch.setenv("REPO_SEEN", str(seen))
++    monkeypatch.setenv("FRAMEWORK_SEEN", str(framework))
++    (repo / ".husky/pre-commit").write_text('printf "%s" "${PREK_HOME:-unset}" > "$REPO_SEEN"\nexit "${REPO_HOOK_STATUS:-0}"\n')
++    (repo / ".husky/post-checkout").write_text('printf repository >> "$REPO_SEEN"\n')
++    command(repo, "git", "add", "package.json", "package-lock.json", ".gitignore")
++    return repo, seen, framework
++
++
++def test_real_husky_failure_and_the_session_reinstall_boundary(
++    real_husky_repo: tuple[Path, Path, Path], isolated_home: Path, monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    repo, seen, framework = real_husky_repo
++    # Original behavior: the repository override bypasses host-home selection.
++    command(repo, "git", "commit", "-qm", "baseline")
++    assert seen.read_text() == "unset"
++    isolated.session_start(repo, home=isolated_home)
++    command(repo, "git", "commit", "--allow-empty", "-qm", "candidate")
++    assert seen.read_text() == str(isolated_home / ".local/share/prek-host")
++    before = command(repo, "git", "rev-parse", "HEAD").stdout
++    monkeypatch.setenv("REPO_HOOK_STATUS", "7")
++    assert command(repo, "git", "commit", "--allow-empty", "-qm", "must fail", check=False).returncode != 0
++    assert command(repo, "git", "rev-parse", "HEAD").stdout == before
++    monkeypatch.delenv("REPO_HOOK_STATUS")
++    command(repo, "git", "checkout", "-qb", "both-hooks")
++    assert framework.read_text() == "framework"
++    assert seen.read_text().endswith("repository")
++    # A real offline reinstall restores the override until the next session.
++    command(repo, "npm", "install", "--offline", "--no-audit", "--no-fund")
++    command(repo, "git", "commit", "--allow-empty", "-qm", "unreconciled window")
++    assert seen.read_text() == "unset"
++    isolated.session_start(repo, home=isolated_home)
++    command(repo, "git", "commit", "--allow-empty", "-qm", "reconciled")
++    assert seen.read_text() == str(isolated_home / ".local/share/prek-host")
++    assert command(repo, "git", "config", "--get-all", "magpie.localHooksPath").stdout == ".husky/_\n"
++
++
++def test_real_husky_uses_each_linked_worktrees_wrapper(
++    real_husky_repo: tuple[Path, Path, Path], isolated_home: Path,
++) -> None:
++    repo, seen, framework = real_husky_repo
++    command(repo, "git", "commit", "-qm", "initial")
++    isolated.session_start(repo, home=isolated_home)
++    linked = repo.parent / "linked"
++    command(repo, "git", "worktree", "add", "-qb", "linked", str(linked))
++    (linked / ".claude").mkdir()
++    command(linked, "npm", "install", "--offline", "--no-audit", "--no-fund")
++    # A linked-only session reports the shared override and changes nothing.
++    config = repo / ".git/config"
++    before = config.read_bytes()
++    assert "start a session in the main checkout" in isolated.session_start(linked, home=isolated_home)
++    assert config.read_bytes() == before
++    isolated.session_start(repo, home=isolated_home)
++    (linked / ".husky/pre-commit").write_text('printf linked > "$REPO_SEEN"\n')
++    command(linked, "git", "commit", "--allow-empty", "-qm", "linked hook")
++    assert seen.read_text() == "linked"
++    (linked / ".husky/post-checkout").write_text('printf linked-checkout > "$REPO_SEEN"\n')
++    command(linked, "git", "checkout", "-qb", "linked-next")
++    assert seen.read_text() == "linked-checkout"
++    assert framework.read_text() == "framework"
+diff --git a/tools/setup-preflight/tests/test_isolated.py b/tools/setup-preflight/tests/test_isolated.py
+index 1b0bfd380..2c8079720 100644
+--- a/tools/setup-preflight/tests/test_isolated.py
++++ b/tools/setup-preflight/tests/test_isolated.py
+@@ -647,3 +647,145 @@ def test_the_rewritten_config_keeps_its_mode(tmp_path: Path, isolated_home: Path
+     isolated.session_start(repo, home=isolated_home)
+     assert local_hooks_path(repo) == ""
+     assert config.stat().st_mode & 0o777 == 0o640
++
++
++# Husky relocation must use the same no-follow, atomic config transaction.
++def husky_checkout(tmp_path: Path) -> Path:
++    repo = git_repo(tmp_path / "repo")
++    (repo / ".husky" / "_").mkdir(parents=True)
++    subprocess.run(["git", "-C", str(repo), "config", "core.hooksPath", ".husky/_"], check=True)
++    return repo
++
++
++def saved_hooks_paths(repo: Path) -> list[str]:
++    done = subprocess.run(
++        ["git", "config", "--file", str(repo / ".git" / "config"), "--get-all", "magpie.localHooksPath"],
++        capture_output=True, text=True, check=False,
++    )
++    return done.stdout.splitlines()
++
++
++def test_husky_path_is_saved_atomically_and_reinstallation_is_idempotent(
++    tmp_path: Path, isolated_home: Path
++) -> None:
++    whole_user_dispatcher(isolated_home)
++    repo = husky_checkout(tmp_path)
++    config = repo / ".git" / "config"
++    config.chmod(0o640)
++    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Preserved"], check=True)
++    isolated.session_start(repo, home=isolated_home)
++    assert local_hooks_path(repo) == ""
++    assert saved_hooks_paths(repo) == [".husky/_"]
++    assert config.stat().st_mode & 0o777 == 0o640
++    assert "Preserved" in config.read_text()
++    first = config.read_bytes()
++    isolated.session_start(repo, home=isolated_home)
++    assert config.read_bytes() == first
++    subprocess.run(["git", "-C", str(repo), "config", "core.hooksPath", ".husky/_"], check=True)
++    isolated.session_start(repo, home=isolated_home)
++    assert local_hooks_path(repo) == ""
++    assert saved_hooks_paths(repo) == [".husky/_"]
++
++
++@pytest.mark.parametrize("saved", [["other"], [".husky/_", ".husky/_"], [".husky/_", "other"]])
++def test_husky_conflicting_saved_keys_preserve_the_whole_config(
++    tmp_path: Path, isolated_home: Path, saved: list[str]
++) -> None:
++    whole_user_dispatcher(isolated_home)
++    repo = husky_checkout(tmp_path)
++    for value in saved:
++        subprocess.run(["git", "-C", str(repo), "config", "--add", "magpie.localHooksPath", value], check=True)
++    config = repo / ".git" / "config"
++    before = config.read_bytes()
++    message = isolated.session_start(repo, home=isolated_home)
++    assert "conflicting magpie.localHooksPath" in message
++    assert config.read_bytes() == before
++
++
++def test_husky_global_saved_key_is_not_silently_combined_with_a_local_key(
++    tmp_path: Path, isolated_home: Path
++) -> None:
++    whole_user_dispatcher(isolated_home)
++    with (isolated_home / ".gitconfig").open("a") as handle:
++        handle.write("[magpie]\n\tlocalHooksPath = .husky/_\n")
++    repo = husky_checkout(tmp_path)
++    before = (repo / ".git" / "config").read_bytes()
++    assert "must be repository-local" in isolated.session_start(repo, home=isolated_home)
++    assert (repo / ".git" / "config").read_bytes() == before
++
++
++@pytest.mark.parametrize("kind", ["file", "extension"])
++def test_husky_worktree_config_is_reported_without_rewriting(
++    tmp_path: Path, isolated_home: Path, kind: str
++) -> None:
++    whole_user_dispatcher(isolated_home)
++    repo = husky_checkout(tmp_path)
++    config = repo / ".git" / "config"
++    if kind == "file":
++        (repo / ".git" / "config.worktree").write_text("[magpie]\nlocalHooksPath = .husky/_\n")
++    else:
++        with config.open("a") as handle:
++            handle.write("[extensions]\nworktreeConfig = true\n")
++    before = config.read_bytes()
++    assert "does not support config.worktree" in isolated.session_start(repo, home=isolated_home)
++    assert config.read_bytes() == before
++
++
++@pytest.mark.parametrize("kind", ["escape", "loop"])
++def test_husky_unsafe_directory_is_not_relocated(
++    tmp_path: Path, isolated_home: Path, kind: str
++) -> None:
++    whole_user_dispatcher(isolated_home)
++    repo = git_repo(tmp_path / "repo")
++    (repo / ".husky").symlink_to(tmp_path if kind == "escape" else repo / ".husky")
++    if kind == "escape":
++        (tmp_path / "_").mkdir()
++    subprocess.run(["git", "-C", str(repo), "config", "core.hooksPath", ".husky/_"], check=True)
++    config = repo / ".git" / "config"
++    before = config.read_bytes()
++    assert "hook directory is missing or escapes" in isolated.session_start(repo, home=isolated_home)
++    assert config.read_bytes() == before
++
++
++@pytest.mark.parametrize("core_extra", ["symlinks", "worktree"])
++def test_existing_redundant_path_cleanup_survives_unrelated_booleans(
++    tmp_path: Path, isolated_home: Path, core_extra: str,
++) -> None:
++    whole_user_dispatcher(isolated_home)
++    repo = git_repo(tmp_path / "repo")
++    config = repo / ".git/config"
++    with config.open("a") as handle:
++        handle.write(f"[core]\nhooksPath = {repo / '.git/hooks'}\n")
++        handle.write("symlinks\n" if core_extra == "symlinks" else "[extensions]\nworktreeConfig = true\n")
++    message = isolated.session_start(repo, home=isolated_home)
++    assert local_hooks_path(repo) == ""
++    assert "Husky relocation" not in message
++
++
++def test_husky_worktree_config_false_is_not_enabled(tmp_path: Path, isolated_home: Path) -> None:
++    whole_user_dispatcher(isolated_home)
++    repo = husky_checkout(tmp_path)
++    with (repo / ".git/config").open("a") as handle:
++        handle.write("[extensions]\nworktreeConfig = false\n")
++    isolated.session_start(repo, home=isolated_home)
++    assert local_hooks_path(repo) == ""
++    assert saved_hooks_paths(repo) == [".husky/_"]
++
++
++def test_linked_notice_reader_is_silent_without_husky_and_never_writes(tmp_path: Path) -> None:
++    main = git_repo(tmp_path / "main")
++    admin = main / ".git/worktrees/linked"
++    admin.mkdir(parents=True)
++    linked = tmp_path / "linked"
++    linked.mkdir()
++    (linked / ".git").write_text(f"gitdir: {admin}\n")
++    (admin / "commondir").write_text("../..\n")
++    config = main / ".git/config"
++    original = config.read_bytes()
++    assert isolated._linked_husky_notice(linked) == []
++    assert config.read_bytes() == original
++    with config.open("a") as handle:
++        handle.write("[core]\nhooksPath = .husky/_\n")
++    before = config.read_bytes()
++    assert "start a session in the main checkout" in isolated._linked_husky_notice(linked)[0]
++    assert config.read_bytes() == before

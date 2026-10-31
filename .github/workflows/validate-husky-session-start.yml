@@ -1,0 +1,25 @@
+name: Validate Husky SessionStart integration
+on:
+  push:
+    branches: [validate-husky-session-start-1823]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Read diagnostic packet
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          path: packet
+      - name: Read pinned upstream source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: apache/magpie
+          ref: dbaa84f3e6c294be30c68cb2abba36c623d45d47
+          persist-credentials: false
+          path: source
+      - name: Run bounded Docker validation
+        run: python3 packet/host.py

@@ -1,0 +1,113 @@
+{
+  "base": "dbaa84f3e6c294be30c68cb2abba36c623d45d47",
+  "patch_sha256": "124c77d5ce4da29c9d5302e5a756057df2119e2047600942f6826710d6a52693",
+  "source": [
+    {
+      "path": ".claude/settings.json",
+      "bytes": 8728,
+      "sha256": "6dcbd846a962f30c6d7f6ba3747bd74e207f7b1871cc6bb47e9278304d44606b"
+    },
+    {
+      "path": "docs/setup/secure-agent-setup.md",
+      "bytes": 236042,
+      "sha256": "b85bc4bd9bba0cae683d5368a09bb6ed59392b606894ba8bb4e3346587be6ee3"
+    },
+    {
+      "path": "plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md",
+      "bytes": 20048,
+      "sha256": "fc6a10a4169025545405abd6fb9271216629a3802a9963889620b61647df8fa4"
+    },
+    {
+      "path": "plugins/magpie-setup/skills/setup/setup_preflight/isolated.py",
+      "bytes": 38803,
+      "sha256": "2b5a0d8adcd6dbc14262a67cc34bd297d0b3bb1c61226b34b4c5e31487c82b2f"
+    },
+    {
+      "path": "tools/agent-isolation/README.md",
+      "bytes": 24657,
+      "sha256": "30c45ce29f1319cea3f672ac353fcd49a89c38688e889c2d0fd37ae216d895c1"
+    },
+    {
+      "path": "tools/agent-isolation/git-hook-dispatcher.sh",
+      "bytes": 15676,
+      "sha256": "e90806a2baa0a44f5fc2c6a52a6fe80ed51d71db4b51394c6a750a4086a65259"
+    },
+    {
+      "path": "tools/agent-isolation/tests/test_git_hook_dispatcher.py",
+      "bytes": 16560,
+      "sha256": "22e7f8eb97f3926be8abe97b32e31b5085dd649dbb446ea9ff4c21f668b60412"
+    },
+    {
+      "path": "tools/dev/sync-hook-managers.py",
+      "bytes": 12817,
+      "sha256": "b560e394e29e137cc139c310484661b594a217f221d59fceaf5dba2d205c554a"
+    },
+    {
+      "path": "tools/dev/tests/test_sync_hook_managers.py",
+      "bytes": 10299,
+      "sha256": "1331440da7e497a3cead2653dad7f3217ed40003f3437614747424d704edda8f"
+    },
+    {
+      "path": "tools/hook-manager/README.md",
+      "bytes": 27698,
+      "sha256": "0e35646d2511f18755b67f634e1fe5fe890bd279a6c89fabf76d7d8922267e0c"
+    },
+    {
+      "path": "tools/hook-manager/registry.json",
+      "bytes": 2878,
+      "sha256": "7d4a647e3f3fc8e36afbc0a6cd914e6bd65cd86c5667fc86588f80cf3fceab7a"
+    },
+    {
+      "path": "tools/sandbox-lint/expected.json",
+      "bytes": 10217,
+      "sha256": "e1a01cabbc7b11374b520678a01b63c5fa2bc6e5acd5b59dea00050914ffd327"
+    },
+    {
+      "path": "tools/setup-preflight/tests/test_husky_integration.py",
+      "bytes": 7513,
+      "sha256": "92bab4b2751dbcf2f5fbd55632b25ada3132e53ba8bb471949c8f8b5b9cc8182"
+    },
+    {
+      "path": "tools/setup-preflight/tests/test_isolated.py",
+      "bytes": 34134,
+      "sha256": "ca9edf00bf4e23f5997cce10278cc8add1f16e505a145564592ac072fe0f5406"
+    }
+  ],
+  "image": "ghcr.io/astral-sh/uv@sha256:8d1825eb3e41b0142309f4a1c5c7781f072d8c8c9964ea073f34788a030bbeba",
+  "node": {
+    "version": "22.20.0",
+    "npm": "10.9.3",
+    "bytes": 30737976,
+    "sha256": "00bbd05e306ea68b6e13e17360d0e2f680b493ef95f2fea1c4296ff7437530bc",
+    "checksum_provenance": "H475 official SHASUMS256.txt reuse; exact named target",
+    "runtime_unrun": true
+  },
+  "tokenizer": {
+    "cache_key": "9b5ad71b2ce5302211f9c61530b329a4922fc6a4",
+    "bytes": 1681126,
+    "sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
+  },
+  "lychee_lock_sha256": "0b181ed9523134a33ecca09587b7ca11a5f82abd0cd762194e71aaeb8b8bc42b",
+  "downloads": {
+    "node.tar.xz": {
+      "url": "https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.xz",
+      "bytes": 30737976,
+      "sha256": "00bbd05e306ea68b6e13e17360d0e2f680b493ef95f2fea1c4296ff7437530bc"
+    },
+    "husky.tgz": {
+      "url": "https://registry.npmjs.org/husky/-/husky-9.1.7.tgz",
+      "bytes": 2448,
+      "sha256": "720e354eba8b12afd32ac5844499753375916a721ee47ea7194e9b32ed44fe0c"
+    },
+    "tokenizer.bpe": {
+      "url": "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken",
+      "bytes": 1681126,
+      "sha256": "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
+    },
+    "jq": {
+      "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64",
+      "bytes": 2255816,
+      "sha256": "020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d"
+    }
+  }
+}
