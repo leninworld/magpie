@@ -18,7 +18,17 @@ P=Path(__file__).resolve().parent
 S=P.parent/'source'
 STATE=P.parent/'runtime'
 BEGIN=time.monotonic()
-DEADLINE_EPOCH=time.time()+50*60
+# Final prepared correction2: one new workflow, no observation-time reset.
+run_id=os.environ["GITHUB_RUN_ID"]
+assert re.fullmatch(r"[0-9]+",run_id)
+assert os.environ["GITHUB_REPOSITORY"]=="leninworld/magpie"
+assert re.fullmatch(r"[0-9a-f]{40}",os.environ["GITHUB_SHA"])
+job_started=os.environ["VALIDATION_JOB_STARTED_EPOCH"]
+assert re.fullmatch(r"[0-9]+",job_started)
+job_started=float(job_started)
+assert 0 <= time.time()-job_started <= 300,"STALE_JOB_ANCHOR"
+SESSION_TARGET_EPOCH=job_started+50*60
+DEADLINE_EPOCH=SESSION_TARGET_EPOCH
 OWN=None
 LAST_SAMPLE=0
 M=json.loads((P/'manifest.json').read_text())
@@ -30,7 +40,7 @@ RX=Path('/sys/class/net')/route[0]/'statistics/rx_bytes'
 NETWORK_START=int(RX.read_text())
 
 def guard():
-    assert time.monotonic()-BEGIN<50*60,'HOST_TARGET_TIME'
+    assert time.monotonic()-BEGIN<50*60 and time.time()<SESSION_TARGET_EPOCH,'HOST_TARGET_TIME'
     assert shutil.disk_usage(P).free>=3*1024**3,'HOST_DISK_PRESSURE'
     available=int(re.search(r'^MemAvailable:\s+(\d+)',Path('/proc/meminfo').read_text(),re.M)[1])*1024
     assert available>=1536*1024**2,'HOST_MEMORY_PRESSURE'
@@ -96,6 +106,7 @@ def download(item,name):
     assert size==item['bytes'] and h.hexdigest()==item['sha256'],'DOWNLOAD_IDENTITY'
 
 try:
+    assert SESSION_TARGET_EPOCH-time.time()>=17*60,'INSUFFICIENT_CURRENT_JOB_BUDGET'
     assert platform.machine()=='x86_64' and os.getuid()==1001
     STATE.mkdir();(STATE/'inputs').mkdir()
     assert shutil.disk_usage(P).free>=18*1024**3,'WORKSPACE_DISK_ADMISSION'
@@ -120,7 +131,7 @@ try:
     for n in ['cache','home','temp']: (STATE/n).mkdir()
     ident=os.environ['GITHUB_RUN_ID'];assert re.fullmatch('[0-9]+',ident)
     tag='magpie1823-validation:'+ident
-    command('dedicated-account-image',['docker','build','--network=none','--tag',tag,'--file',str(P/'Dockerfile'),str(P)],90)
+    command('dedicated-account-image',['docker','build','--network=none','--build-context','verified_inputs='+str(STATE/'inputs'),'--tag',tag,'--file',str(P/'Dockerfile'),str(P)],90)
     assert time.monotonic()-BEGIN<8*60,'SETUP_CAP'
     name='magpie1823-validation-'+ident
     argv=['docker','create','--env','VALIDATION_DEADLINE_EPOCH='+str(DEADLINE_EPOCH),'--name',name,'--label','org.magpie1823.run='+ident,'--init','--read-only','--cpus','2','--memory','8g','--memory-swap','8g','--pids-limit','512','--security-opt','no-new-privileges','--cap-drop','ALL','--tmpfs','/fixtures:rw,size=512m,mode=1777','--mount','type=bind,src='+str(P)+',dst=/packet,readonly','--mount','type=bind,src='+str(S)+',dst=/project','--mount','type=bind,src='+str(STATE)+',dst=/runtime','--mount','type=bind,src='+str(STATE/'cache')+',dst=/cache','--mount','type=bind,src='+str(STATE/'home')+',dst=/home/validation','--mount','type=bind,src='+str(STATE/'temp')+',dst=/tmp','--mount','type=bind,src='+str(STATE/'inputs')+',dst=/inputs,readonly',tag,'python3','/packet/inside.py']

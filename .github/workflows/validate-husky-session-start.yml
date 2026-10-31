@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      - name: Record validation job clock
+        run: echo "VALIDATION_JOB_STARTED_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
       - name: Read diagnostic packet
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -18,7 +20,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: apache/magpie
-          ref: dbaa84f3e6c294be30c68cb2abba36c623d45d47
+          ref: 0b57313e69ec2d0cc5c129371cee0b6215659a3d
           persist-credentials: false
           path: source
       - name: Run bounded Docker validation

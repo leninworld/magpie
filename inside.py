@@ -120,11 +120,11 @@ try:
                 resolved=(tools/path.parent/item.linkname).resolve()
                 assert resolved.is_relative_to(tools/'node-v22.20.0-linux-x64')
         archive.extractall(tools,filter='data')
-    binary=tools/'bin';binary.mkdir()
-    jqdata=Path('/inputs/jq').read_bytes()
-    assert hashlib.sha256(jqdata).hexdigest()==M['downloads']['jq']['sha256']
-    (binary/'jq').write_bytes(jqdata);(binary/'jq').chmod(0o755)
-    os.environ['PATH']=str(binary)+os.pathsep+str(tools/'node-v22.20.0-linux-x64/bin')+os.pathsep+os.environ['PATH']
+    jq=Path('/usr/bin/jq')
+    assert jq.is_file() and not jq.is_symlink() and jq.stat().st_uid==0 and not os.access(jq,os.W_OK), 'JQ_NOT_TRUSTED_SYSTEM_FILE'
+    assert hashlib.sha256(jq.read_bytes()).hexdigest()==M['downloads']['jq']['sha256']
+    assert run('trusted-jq-version',[str(jq),'--version'],10).decode().strip()=='jq-1.8.1'
+    os.environ['PATH']=str(tools/'node-v22.20.0-linux-x64/bin')+os.pathsep+os.environ['PATH']
     assert run('node-version',['node','--version'],10).decode().strip()=='v22.20.0'
     assert run('npm-version',['npm','--version'],10).decode().strip()=='10.9.3'
     os.environ.update({'UV_CACHE_DIR':'/cache/uv','PREK_HOME':'/cache/prek','CARGO_BUILD_JOBS':'2','MAGPIE_HUSKY_TARBALL':'/inputs/husky.tgz','TIKTOKEN_CACHE_DIR':'/cache/tiktoken'})

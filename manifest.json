@@ -1,6 +1,6 @@
 {
-  "base": "dbaa84f3e6c294be30c68cb2abba36c623d45d47",
-  "patch_sha256": "124c77d5ce4da29c9d5302e5a756057df2119e2047600942f6826710d6a52693",
+  "base": "0b57313e69ec2d0cc5c129371cee0b6215659a3d",
+  "patch_sha256": "5742af4a5b0172d941956fc35b9795904ed1a2906966a9acebef09446005a2f9",
   "source": [
     {
       "path": ".claude/settings.json",
@@ -9,13 +9,13 @@
     },
     {
       "path": "docs/setup/secure-agent-setup.md",
-      "bytes": 236042,
-      "sha256": "b85bc4bd9bba0cae683d5368a09bb6ed59392b606894ba8bb4e3346587be6ee3"
+      "bytes": 236521,
+      "sha256": "e6a320cc18457ab439be3643241817f6c234bd6eebb391b90daf73c5ebbe2c17"
     },
     {
       "path": "plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md",
-      "bytes": 20048,
-      "sha256": "fc6a10a4169025545405abd6fb9271216629a3802a9963889620b61647df8fa4"
+      "bytes": 20516,
+      "sha256": "cf03ec604526ad791265cb4e167057cde10c4f5e8debefcdb06ce86ebd73650c"
     },
     {
       "path": "plugins/magpie-setup/skills/setup/setup_preflight/isolated.py",
@@ -24,38 +24,38 @@
     },
     {
       "path": "tools/agent-isolation/README.md",
-      "bytes": 24657,
-      "sha256": "30c45ce29f1319cea3f672ac353fcd49a89c38688e889c2d0fd37ae216d895c1"
+      "bytes": 25028,
+      "sha256": "b8703b431d476e85e4d599193fe4004e9855ace550065d6eff0d0f9ec275e248"
     },
     {
       "path": "tools/agent-isolation/git-hook-dispatcher.sh",
-      "bytes": 15676,
-      "sha256": "e90806a2baa0a44f5fc2c6a52a6fe80ed51d71db4b51394c6a750a4086a65259"
+      "bytes": 16995,
+      "sha256": "3d9e013443e806954fda6f9e488c95f2ed914e17a31fcbc674eda9c235887789"
     },
     {
       "path": "tools/agent-isolation/tests/test_git_hook_dispatcher.py",
-      "bytes": 16560,
-      "sha256": "22e7f8eb97f3926be8abe97b32e31b5085dd649dbb446ea9ff4c21f668b60412"
+      "bytes": 18568,
+      "sha256": "077a3eef6d5df9b1d58bce1feb1b9784179d5eb6f254f8a71435377f96fda88c"
     },
     {
       "path": "tools/dev/sync-hook-managers.py",
-      "bytes": 12817,
-      "sha256": "b560e394e29e137cc139c310484661b594a217f221d59fceaf5dba2d205c554a"
+      "bytes": 14680,
+      "sha256": "7dff38e377bd2b923abf5272e0eb7a8d6c8745f2ed3fbd036c5fe9a8c85d9820"
     },
     {
       "path": "tools/dev/tests/test_sync_hook_managers.py",
-      "bytes": 10299,
-      "sha256": "1331440da7e497a3cead2653dad7f3217ed40003f3437614747424d704edda8f"
+      "bytes": 12476,
+      "sha256": "c38a1699b6b0264a8ce8e8e6eb432e8752bf0c816b391871fdc9bca2498c9a7f"
     },
     {
       "path": "tools/hook-manager/README.md",
-      "bytes": 27698,
-      "sha256": "0e35646d2511f18755b67f634e1fe5fe890bd279a6c89fabf76d7d8922267e0c"
+      "bytes": 30893,
+      "sha256": "0f0abda16800b33c1d25f089ba3314fc108bcb327f0371ea20d4be0746f95233"
     },
     {
       "path": "tools/hook-manager/registry.json",
-      "bytes": 2878,
-      "sha256": "7d4a647e3f3fc8e36afbc0a6cd914e6bd65cd86c5667fc86588f80cf3fceab7a"
+      "bytes": 3314,
+      "sha256": "ab36e8889ad5f6d79962380d99b793b9720e20ff01d4ee530a6081683cbe735e"
     },
     {
       "path": "tools/sandbox-lint/expected.json",

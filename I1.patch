@@ -1,5 +1,4 @@
 diff --git a/.claude/settings.json b/.claude/settings.json
-index f1aa1bd49..967538d94 100644
 --- a/.claude/settings.json
 +++ b/.claude/settings.json
 @@ -84,6 +84,7 @@
@@ -11,18 +10,17 @@ index f1aa1bd49..967538d94 100644
        "Read(~/.ssh/**)",
        "Read(~/.netrc)",
 diff --git a/docs/setup/secure-agent-setup.md b/docs/setup/secure-agent-setup.md
-index a1701791c..d04f4c6e4 100644
 --- a/docs/setup/secure-agent-setup.md
 +++ b/docs/setup/secure-agent-setup.md
-@@ -1449,6 +1449,7 @@ dispatchers + hook-manager shim):
+@@ -1453,6 +1453,7 @@
  
  | Repo's local hook | Result |
  |---|---|
 +| Husky 9.1.7 after SessionStart relocation (validation pending) | dispatcher → actual worktree `.husky/_/<name>` → repository hook; failures abort non-post-checkout operations; repeat installs require another SessionStart |
  | prek shim in `.git/hooks/` (installed via the shim) | dispatcher → prek runs that repo's `.pre-commit-config.yaml` |
+ | overcommit hook in `.git/hooks/` (installed via the shim) | dispatcher → overcommit runs that repo's `.overcommit.yml`; its self-check sees the repo's hooks path |
  | local hook installed by a manager requiring no install fix (`simple-git-hooks`, `cargo-husky`, `git-code-format-maven-plugin`, `git-build-hook`) | dispatcher → local hook runs natively (installs straight to `.git/hooks/` ignoring global `core.hooksPath`) |
- | hand-written `.git/hooks/<name>`, or one a manager without an adapter put there | dispatcher → that hook runs (heterogeneous tooling coexists) |
-@@ -4270,3 +4271,28 @@ gaps; together they are the actual sandbox.
+@@ -4275,3 +4276,28 @@
    files (`<tracker>`, `<upstream>`, `<security-list>`, …).
  - [`README.md`](../../README.md) — framework overview and how the
    secure setup fits the broader skill workflow.
@@ -52,19 +50,17 @@ index a1701791c..d04f4c6e4 100644
 +sandbox filesystem enforcement is enabled. It does not establish protection for
 +arbitrary XDG paths, disabled filesystem isolation or unseen policy sources.
 diff --git a/plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md b/plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md
-index 8238917ff..a806086d9 100644
 --- a/plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md
 +++ b/plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md
-@@ -333,10 +333,12 @@ for the full rationale + the validated behaviour matrix.
+@@ -333,10 +333,13 @@
     into `~/.claude/bin/<tool>` (or symlink from
     `~/.claude-config/bin/<tool>`), mode `0755`, once for each adapter in the
     [hook-manager registry](../../../../tools/hook-manager/registry.json)
 -   with an install strategy other than `none`
-+   with the `git-dir-flag` install strategy
-    that a repository the operator works in uses — `~/.claude/bin/prek` today.
--   A manager whose install strategy is `none` needs no install fix
--   and gets no shim.
-+   A manager whose install strategy is `none` needs no install fix.
++   with a shim-based install strategy
+    that a repository the operator works in uses — `~/.claude/bin/prek` and
+    `~/.claude/bin/overcommit` today. A manager whose install strategy is
+    `none` needs no install fix and gets no shim.
 +   Husky's `session-start-relocation` instead reconciles its exact `.husky/_`
 +   config at SessionStart; do not install a PATH shim for it. See the
 +   [Husky contract](../../../../tools/hook-manager/README.md#husky-session-start-relocation).
@@ -72,10 +68,9 @@ index 8238917ff..a806086d9 100644
     (or tracked below it, for prek's nested projects) or one of its installed
     hooks runs it ([Detection](../../../../tools/hook-manager/README.md#detection));
 diff --git a/plugins/magpie-setup/skills/setup/setup_preflight/isolated.py b/plugins/magpie-setup/skills/setup/setup_preflight/isolated.py
-index f01fef5f2..896a95013 100644
 --- a/plugins/magpie-setup/skills/setup/setup_preflight/isolated.py
 +++ b/plugins/magpie-setup/skills/setup/setup_preflight/isolated.py
-@@ -447,7 +447,9 @@ def _shown(value: str) -> str:
+@@ -447,7 +447,9 @@
      return repr(cleaned)
  
  
@@ -86,7 +81,7 @@ index f01fef5f2..896a95013 100644
      """Indices and values of `[core] hooksPath` lines, or None when the file is not plain enough.
  
      Only a plain file is rewritten: an `include` directive, a continued or
-@@ -477,8 +479,11 @@ def _core_hooks_path_lines(text: str) -> tuple[list[int], list[str]] | None:
+@@ -477,8 +479,11 @@
              return None  # a header this parser does not understand
          if line.rstrip().endswith("\\"):
              return None
@@ -100,7 +95,7 @@ index f01fef5f2..896a95013 100644
              value = match.group(1)
              if len(value) >= 2 and value[0] == value[-1] == '"':
                  value = value[1:-1]
-@@ -487,6 +492,60 @@ def _core_hooks_path_lines(text: str) -> tuple[list[int], list[str]] | None:
+@@ -487,6 +492,60 @@
      return indices, values
  
  
@@ -161,7 +156,7 @@ index f01fef5f2..896a95013 100644
  def _rewrite_repo_config(checkout: Path, home: Path, own_hooks: Path) -> list[str]:
      """Drop `core.hooksPath` from `<checkout>/.git/config` when it names `own_hooks`.
  
-@@ -503,7 +562,7 @@ def _rewrite_repo_config(checkout: Path, home: Path, own_hooks: Path) -> list[st
+@@ -503,7 +562,7 @@
          try:
              gfd = os.open(".git", os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=cfd)
          except OSError:
@@ -170,7 +165,7 @@ index f01fef5f2..896a95013 100644
          try:
              try:
                  fd = os.open("config", os.O_RDONLY | _NOFOLLOW, dir_fd=gfd)
-@@ -526,13 +585,48 @@ def _rewrite_repo_config(checkout: Path, home: Path, own_hooks: Path) -> list[st
+@@ -526,13 +585,48 @@
                      f"{config} may set core.hooksPath (it uses includes); check it skips no hooks you need"
                  ]
              indices, values = parsed
@@ -221,7 +216,7 @@ index f01fef5f2..896a95013 100644
                      return [f"{config} sets core.hooksPath={_shown(values[0])}; unset it by hand"]
                  tmp_name = f".config.{secrets.token_hex(8)}.tmp"
                  try:
-@@ -572,8 +666,9 @@ def drop_redundant_hooks_path(root: Path, home: Path | None = None) -> list[str]
+@@ -572,8 +666,9 @@
      that sets `core.hooksPath` to its own `.git/hooks` (some `prek install`
      runs do) skips the dispatcher, and with it the host-only prek home for
      hooks run outside the sandbox. The dispatcher chains to `.git/hooks`
@@ -233,7 +228,7 @@ index f01fef5f2..896a95013 100644
      directory its sandbox-writable `.git` file names.
      """
      home = home if home is not None else Path.home()
-@@ -584,6 +679,8 @@ def drop_redundant_hooks_path(root: Path, home: Path | None = None) -> list[str]
+@@ -584,6 +679,8 @@
      if Path(os.path.realpath(hooks_dir / "post-checkout")).name != "git-hook-dispatcher.sh":
          return []
      checkout = _checkout(root)
@@ -243,22 +238,20 @@ index f01fef5f2..896a95013 100644
  
  
 diff --git a/tools/agent-isolation/README.md b/tools/agent-isolation/README.md
-index 226353a7a..8ceb789e1 100644
 --- a/tools/agent-isolation/README.md
 +++ b/tools/agent-isolation/README.md
-@@ -97,8 +97,8 @@ per runtime — see [`docs/adapters/add-a-harness.md`](../../docs/adapters/add-a
+@@ -97,8 +97,8 @@
  | [`claude-term-bg.sh`](claude-term-bg.sh) | **Opt-in quality-of-life helper (not a security control).** Keeps a calm baseline background and tints it only when Claude genuinely wants you to act (never while working, and never when it merely *finished* a turn), so a window you've tabbed away from can't sit blocked unnoticed. Distinguishes "blocked on a decision" from "finished and idle" — which look identical at the `Stop` event — via three signals across six hooks: `Stop` → `stop` (heuristic — tints only if the final assistant message reads as a question/request; a completion stays calm; needs `python3`/`python`, else defaults calm); `PreToolUse` (matcher `AskUserQuestion`) → `wait` (exact — a structured question was posed); `PostToolUse` (matcher `*`) → `reset` (calm while working, and clears the tint the instant you approve a permission prompt or answer a question); `Notification` → `notify` (tints for permission prompts only — the plain idle ping is a no-op so it can't wipe a pending question's tint); and `UserPromptSubmit` + `SessionStart` → `reset` (you replied / fresh session clears any stale tint). Writes the OSC escape to the Claude pty discovered by walking the process tree (hooks have no controlling tty); the only deterministic reset is an explicit `CLAUDE_RESET_BG` colour via OSC 11 (iTerm2 ignores OSC 111). Colours overridable via `CLAUDE_WAIT_BG` / `CLAUDE_RESET_BG`. Tested on iTerm2 + macOS; fail-soft elsewhere. See [`docs/setup/secure-agent-setup.md` → *Waiting-for-input terminal tint*](../../docs/setup/secure-agent-setup.md#waiting-for-input-terminal-tint). |
  | [`sandbox-add-project-root.sh`](sandbox-add-project-root.sh) | Adds the current adopter repo's project root (and, with `--all-worktrees`, every linked git worktree's working dir) as an explicit absolute path to `sandbox.filesystem.allowRead` and `allowWrite` in the project-local, gitignored `<repo>/.claude/settings.local.json` — one entry per worktree, each in that worktree's own settings file. Defensive against [issue #197](https://github.com/apache/magpie/issues/197) — `allowRead: ["."]` does not in practice cover CWD because the harness pre-resolves the `.` literal away from the read side. The same harness behaviour drops the committed home-directory entries, so it also adds the dev-tool paths `prek` and `uv` need (`~/.gitconfig`, `~/.config/git`, `~/.cache`, `~/.local/share/uv`, `~/.local/bin`; the cache and uv dirs writable) as absolute paths — never the credential paths; `--no-tool-paths` skips them. See [`prek` or `uv` not found inside the sandbox](../../docs/setup/sandbox-troubleshooting.md#prek-or-uv-not-found-or-cannot-write-its-cache-inside-the-sandbox). Never modifies user-scope or committed project-scope. Idempotent, atomic, tolerant of missing prereqs. Invoked from `setup-isolated-setup-install`, `/magpie-setup:setup` (adopt / upgrade / worktree-init), and the `post-checkout` git hook installed by `/magpie-setup:setup adopt`. |
  | [`git-global-post-checkout.sh`](git-global-post-checkout.sh) | Universal `post-checkout` git hook installed at `~/.claude/git-hooks/post-checkout` when the operator picks the **simple whole-user** flavour in `setup-isolated-setup-install`. Activated by `git config --global core.hooksPath ~/.claude/git-hooks/` so every `git checkout` / `git clone` / `git worktree add` across the host invokes it. Best-effort + idempotent + `\|\| true`: invokes `sandbox-add-project-root.sh` for any worktree with a `.claude/` directory. Trade-off documented in [`docs/setup/secure-agent-setup.md` → *Per-project vs whole-user scope*](../../docs/setup/secure-agent-setup.md#per-project-vs-whole-user-scope): `core.hooksPath` shadows per-repo `.git/hooks/*` across every repo on the host. The **dispatcher** flavour (below) supersedes this file. |
--| [`git-hook-dispatcher.sh`](git-hook-dispatcher.sh) | Universal, basename-keyed git-hook **dispatcher** for the **whole-user dispatcher** flavour. Symlinked to every hook name under `~/.claude/git-hooks/`. For each git operation it runs the framework's own logic for that hook type (the `post-checkout` sandbox-allowlist sync) **and then chains through to the repo-local `.git/hooks/<name>`** (resolved via `git rev-parse --git-common-dir`, worktree-safe; `exec`-ed with original argv + inherited stdin so a failing local hook still aborts the git op). Restores per-repo hooks (prek / pre-commit / husky / hand-written) under global `core.hooksPath`; a repo with no local hook is a clean no-op. Outside the sandbox it also gives every hook manager in the [hook-manager registry](../hook-manager/registry.json) its host-only home (the contract's home rule). See [`docs/setup/secure-agent-setup.md` → *Whole-user with the per-repo dispatcher*](../../docs/setup/secure-agent-setup.md#whole-user-with-the-per-repo-dispatcher). |
--| [`hook-manager-shim.sh`](hook-manager-shim.sh) | Transparent front for a git-hook manager, installed as `~/.claude/bin/<tool>` (with `~/.claude/bin` prepended to PATH) for the whole-user dispatcher flavour, one install per adapter in the [hook-manager registry](../hook-manager/registry.json) whose install strategy is not `none` (`prek` today). The tool is the name it is installed under. Rewrites **only** the adapter's install subcommand so the hook lands in the repo-local `.git/hooks/` where the dispatcher chains, instead of the shared `core.hooksPath` dir — for prek, injecting `--git-dir "$(git rev-parse --git-common-dir)"` unless the caller already passed `--git-dir`, asked for `--help`, or is outside a git work tree. Every other invocation passes through unchanged; no-op on hosts with no global `core.hooksPath`. Implements the install-target rule of the [hook-manager contract](../hook-manager/README.md). |
-+| [`git-hook-dispatcher.sh`](git-hook-dispatcher.sh) | Universal, basename-keyed git-hook **dispatcher** for the **whole-user dispatcher** flavour. Symlinked to every hook name under `~/.claude/git-hooks/`. For each git operation it runs the framework's own logic for that hook type (the `post-checkout` sandbox-allowlist sync) **and then chains through to the repo-local `.git/hooks/<name>`**, or the real worktree-local `.husky/_/<name>` after [Husky SessionStart relocation](../hook-manager/README.md#husky-session-start-relocation) (resolved via `git rev-parse --git-common-dir`, worktree-safe; `exec`-ed with original argv + inherited stdin so a failing local hook still aborts the git op). Restores per-repo hooks (prek / pre-commit / husky / hand-written) under global `core.hooksPath`; a repo with no local hook is a clean no-op. Outside the sandbox it also gives every hook manager in the [hook-manager registry](../hook-manager/registry.json) its host-only home (the contract's home rule). See [`docs/setup/secure-agent-setup.md` → *Whole-user with the per-repo dispatcher*](../../docs/setup/secure-agent-setup.md#whole-user-with-the-per-repo-dispatcher). |
-+| [`hook-manager-shim.sh`](hook-manager-shim.sh) | Transparent front for a git-hook manager, installed as `~/.claude/bin/<tool>` (with `~/.claude/bin` prepended to PATH) for the whole-user dispatcher flavour, one install per adapter in the [hook-manager registry](../hook-manager/registry.json) whose install strategy is `git-dir-flag` (`prek` today; Husky uses SessionStart relocation). The tool is the name it is installed under. Rewrites **only** the adapter's install subcommand so the hook lands in the repo-local `.git/hooks/` where the dispatcher chains, instead of the shared `core.hooksPath` dir — for prek, injecting `--git-dir "$(git rev-parse --git-common-dir)"` unless the caller already passed `--git-dir`, asked for `--help`, or is outside a git work tree. Every other invocation passes through unchanged; no-op on hosts with no global `core.hooksPath`. Implements the install-target rule of the [hook-manager contract](../hook-manager/README.md). |
+-| [`git-hook-dispatcher.sh`](git-hook-dispatcher.sh) | Universal, basename-keyed git-hook **dispatcher** for the **whole-user dispatcher** flavour. Symlinked to every hook name under `~/.claude/git-hooks/`. For each git operation it runs the framework's own logic for that hook type (the `post-checkout` sandbox-allowlist sync) **and then chains through to the repo-local `.git/hooks/<name>`** (resolved via `git rev-parse --git-common-dir`, worktree-safe; `exec`-ed with original argv + inherited stdin so a failing local hook still aborts the git op). Restores per-repo hooks (prek / overcommit / pre-commit / husky / hand-written) under global `core.hooksPath`; a repo with no local hook is a clean no-op. Outside the sandbox it also gives every hook manager in the [hook-manager registry](../hook-manager/registry.json) its host-only home (the contract's home rule), and before chaining into an overcommit hook it exports the same `core.hooksPath` override the shim used so overcommit's run-time self-check accepts the hook. See [`docs/setup/secure-agent-setup.md` → *Whole-user with the per-repo dispatcher*](../../docs/setup/secure-agent-setup.md#whole-user-with-the-per-repo-dispatcher). |
+-| [`hook-manager-shim.sh`](hook-manager-shim.sh) | Transparent front for a git-hook manager, installed as `~/.claude/bin/<tool>` (with `~/.claude/bin` prepended to PATH) for the whole-user dispatcher flavour, one install per adapter in the [hook-manager registry](../hook-manager/registry.json) whose install strategy is not `none` (`prek` and `overcommit` today). The tool is the name it is installed under. Rewrites **only** the adapter's install action so the hook lands in the repo-local `.git/hooks/` where the dispatcher chains, instead of the shared `core.hooksPath` dir — for prek, injecting `--git-dir "$(git rev-parse --git-common-dir)"` unless the caller already passed `--git-dir`, asked for `--help`, or is outside a git work tree; for overcommit, finding `--install` or its `-i` alias anywhere in argv and setting `core.hooksPath` to `<absolute common dir>/hooks` in the next free `GIT_CONFIG_*` slot. Every other invocation passes through unchanged; no-op on hosts with no global `core.hooksPath`. Implements the install-target rule of the [hook-manager contract](../hook-manager/README.md). |
++| [`git-hook-dispatcher.sh`](git-hook-dispatcher.sh) | Universal, basename-keyed git-hook **dispatcher** for the **whole-user dispatcher** flavour. Symlinked to every hook name under `~/.claude/git-hooks/`. For each git operation it runs the framework's own logic for that hook type (the `post-checkout` sandbox-allowlist sync) **and then chains through to the repo-local `.git/hooks/<name>`**, or the real worktree-local `.husky/_/<name>` after [Husky SessionStart relocation](../hook-manager/README.md#husky-session-start-relocation) (resolved via `git rev-parse --git-common-dir`, worktree-safe; `exec`-ed with original argv + inherited stdin so a failing local hook still aborts the git op). Restores per-repo hooks (prek / overcommit / pre-commit / husky / hand-written) under global `core.hooksPath`; a repo with no local hook is a clean no-op. Outside the sandbox it also gives every hook manager in the [hook-manager registry](../hook-manager/registry.json) its host-only home (the contract's home rule), and before chaining into an overcommit hook it exports the same `core.hooksPath` override the shim used so overcommit's run-time self-check accepts the hook. See [`docs/setup/secure-agent-setup.md` → *Whole-user with the per-repo dispatcher*](../../docs/setup/secure-agent-setup.md#whole-user-with-the-per-repo-dispatcher). |
++| [`hook-manager-shim.sh`](hook-manager-shim.sh) | Transparent front for a git-hook manager, installed as `~/.claude/bin/<tool>` (with `~/.claude/bin` prepended to PATH) for the whole-user dispatcher flavour, one install per adapter in the [hook-manager registry](../hook-manager/registry.json) whose install strategy is shim-based (`prek` and `overcommit` today; Husky uses SessionStart relocation without a PATH shim). The tool is the name it is installed under. Rewrites **only** the adapter's install action so the hook lands in the repo-local `.git/hooks/` where the dispatcher chains, instead of the shared `core.hooksPath` dir — for prek, injecting `--git-dir "$(git rev-parse --git-common-dir)"` unless the caller already passed `--git-dir`, asked for `--help`, or is outside a git work tree; for overcommit, finding `--install` or its `-i` alias anywhere in argv and setting `core.hooksPath` to `<absolute common dir>/hooks` in the next free `GIT_CONFIG_*` slot. Every other invocation passes through unchanged; no-op on hosts with no global `core.hooksPath`. Implements the install-target rule of the [hook-manager contract](../hook-manager/README.md). |
  
  ## Usage at a glance
  
 diff --git a/tools/agent-isolation/git-hook-dispatcher.sh b/tools/agent-isolation/git-hook-dispatcher.sh
-index 11fa36a61..2a86d2cbf 100755
 --- a/tools/agent-isolation/git-hook-dispatcher.sh
 +++ b/tools/agent-isolation/git-hook-dispatcher.sh
 @@ -44,7 +44,8 @@
@@ -271,10 +264,11 @@ index 11fa36a61..2a86d2cbf 100755
  # can keep using prek, husky, lefthook, or a hand-written hook in
  # its own `.git/hooks/` — installed there via, e.g.,
  # `prek install --git-dir "$(git rev-parse --git-common-dir)"`
-@@ -102,6 +103,200 @@ case "$common" in
+@@ -101,6 +102,200 @@
+   *)  common="$(cd "$common" 2>/dev/null && pwd -P || echo "$common")" ;;
  esac
  local_hook="$common/hooks/$hook"
- 
++
 +
 +resolve_husky() {
 +# A session start relocates Husky's exact core.hooksPath here. Preserve the
@@ -468,11 +462,10 @@ index 11fa36a61..2a86d2cbf 100755
 +  husky_refused=1
 +  local_hook=""
 +fi
-+
+ 
  # Guard against chaining into ourselves (defensive; core.hooksPath is a
  # different dir from .git/hooks, but symlink layouts can surprise).
- self_canon="$(readlink -f "$0" 2>/dev/null || echo "$0")"
-@@ -154,6 +349,9 @@ fi
+@@ -184,6 +379,9 @@
  
  # --- non-post-checkout: exec local for a perfect passthrough ---------------
  if [ "$hook" != "post-checkout" ]; then
@@ -483,10 +476,9 @@ index 11fa36a61..2a86d2cbf 100755
      exec "$local_hook" "$@"
    fi
 diff --git a/tools/agent-isolation/tests/test_git_hook_dispatcher.py b/tools/agent-isolation/tests/test_git_hook_dispatcher.py
-index b5acee0dc..08477788f 100644
 --- a/tools/agent-isolation/tests/test_git_hook_dispatcher.py
 +++ b/tools/agent-isolation/tests/test_git_hook_dispatcher.py
-@@ -127,3 +127,260 @@ def test_a_repository_without_a_detected_manager_still_gets_the_host_home(
+@@ -191,3 +191,260 @@
      repo, hook, seen = _repo_with_local_hook(tmp_path, config=None)
      _run(repo, hook, {"PREK_HOME": "~/.cache/prek-sandbox"})
      assert seen.read_text() == HOST_HOME.format(home=os.environ["HOME"])
@@ -748,21 +740,20 @@ index b5acee0dc..08477788f 100644
 +    assert reads == [managed_path]
 +    assert not seen.exists()
 diff --git a/tools/dev/sync-hook-managers.py b/tools/dev/sync-hook-managers.py
-index 63f15fa2d..ac209ff84 100755
 --- a/tools/dev/sync-hook-managers.py
 +++ b/tools/dev/sync-hook-managers.py
-@@ -53,8 +53,8 @@ DISPATCHER = Path("tools/agent-isolation/git-hook-dispatcher.sh")
+@@ -54,8 +54,8 @@
  SANDBOX_LINT = Path("tools/sandbox-lint/src/sandbox_lint/__init__.py")
  SETTINGS = (Path(".claude/settings.json"), Path("tools/sandbox-lint/expected.json"))
  
 -#: Install strategies the shim implements. A new one lands with its shim branch.
--STRATEGIES = {"git-dir-flag", "none"}
+-STRATEGIES = {"git-dir-flag", "hooks-path-env", "none"}
 +#: Install strategies implemented by the shim or SessionStart reconciliation.
-+STRATEGIES = {"git-dir-flag", "session-start-relocation", "none"}
++STRATEGIES = {"git-dir-flag", "hooks-path-env", "session-start-relocation", "none"}
  
  _NAME = re.compile(r"^[a-z][a-z0-9-]*$")
- _ENV = re.compile(r"^[A-Z][A-Z0-9_]*$")
-@@ -108,10 +108,22 @@ def validate(registry: dict[str, Any]) -> list[str]:
+ _SUBCOMMAND = re.compile(r"^(?:--)?[a-z][a-z0-9-]*$")
+@@ -111,10 +111,22 @@
              strategy = install.get("strategy")
              if strategy not in STRATEGIES:
                  errors.append(
@@ -784,10 +775,10 @@ index 63f15fa2d..ac209ff84 100755
 +                ):
 +                    errors.append(f"{where}.detect: Husky needs .husky directory/devDependency detection")
 +            elif strategy != "none":
-                 if not isinstance(install.get("subcommand"), str) or not _NAME.match(install["subcommand"]):
-                     errors.append(f"{where}.install.subcommand: missing")
-                 if strategy == "git-dir-flag" and not (
-@@ -158,7 +170,7 @@ def render(registry: dict[str, Any]) -> dict[Path, str]:
+                 subcommand = install.get("subcommand")
+                 if not isinstance(subcommand, str) or not _SUBCOMMAND.match(subcommand):
+                     errors.append(f"{where}.install.subcommand: missing or not a word or --flag")
+@@ -182,7 +194,7 @@
      cases = []
      for name, adapter in sorted(adapters.items()):
          install = adapter["install"]
@@ -795,8 +786,8 @@ index 63f15fa2d..ac209ff84 100755
 +        if install.get("strategy") in ("none", "session-start-relocation"):
              continue
          fields = [f"install_subcommand={install['subcommand']}", f"install_strategy={install['strategy']}"]
-         if "flag" in install:
-@@ -200,6 +212,8 @@ def check_settings(registry: dict[str, Any], root: Path) -> list[str]:
+         if "aliases" in install:
+@@ -235,6 +247,8 @@
          settings = json.loads((root / rel).read_text(encoding="utf-8"))
          env = settings.get("env") or {}
          deny = (settings.get("permissions") or {}).get("deny") or []
@@ -806,10 +797,9 @@ index 63f15fa2d..ac209ff84 100755
              home = adapter.get("home")
              if not home:
 diff --git a/tools/dev/tests/test_sync_hook_managers.py b/tools/dev/tests/test_sync_hook_managers.py
-index d761d4281..1649e2147 100644
 --- a/tools/dev/tests/test_sync_hook_managers.py
 +++ b/tools/dev/tests/test_sync_hook_managers.py
-@@ -204,3 +204,47 @@ def test_none_strategy_generates_no_shim_case(registry: dict[str, Any]) -> None:
+@@ -256,3 +256,47 @@
      for name, adapter in registry["adapters"].items():
          if adapter["install"]["strategy"] == "none":
              assert f"{name})" not in shim_body
@@ -858,11 +848,10 @@ index d761d4281..1649e2147 100644
 +    errors = mod.check_settings(registry, tree)
 +    assert sum("Husky's default init directory" in error for error in errors) == len(mod.SETTINGS)
 diff --git a/tools/hook-manager/README.md b/tools/hook-manager/README.md
-index 0414e1e96..568abd928 100644
 --- a/tools/hook-manager/README.md
 +++ b/tools/hook-manager/README.md
-@@ -69,8 +69,9 @@ The fix is an **install strategy**, applied by [`hook-manager-shim.sh`](../agent
- The shim takes the tool from the name it is installed under, rewrites only the install subcommand, and passes every other invocation through unchanged.
+@@ -71,8 +71,9 @@
+ A positional action (`prek install`) is only the first argument; a flag-style action (`overcommit --install`) and its registry aliases (`overcommit -i`) are found anywhere in argv, including a single-letter alias inside a bundle of short switches (`-fi`) and any shortening of a long flag (`--inst`).
  It leaves the install alone when the caller already chose a target, asked for help, or is not in a git work tree.
  
 -| Strategy | What the shim does | Status |
@@ -871,8 +860,8 @@ index 0414e1e96..568abd928 100644
 +| `session-start-relocation` | SessionStart moves the exact Husky `.husky/_` override to `magpie.localHooksPath`; the dispatcher executes the actual worktree-local wrapper. No PATH shim. | implemented; validation pending |
  | `git-dir-flag` | Inserts `<flag> <common dir>` after the install subcommand (prek: `--git-dir`; prek refuses a bare install while a global `core.hooksPath` is set). | implemented |
  | `hide-global-config` | Runs the install with `GIT_CONFIG_GLOBAL=/dev/null`, for a manager that writes to the common dir but refuses while a global `core.hooksPath` is set (pre-commit, lefthook). | planned |
- | `hooks-path-env` | Runs the install with `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=core.hooksPath`, `GIT_CONFIG_VALUE_0=<common dir>/hooks`, for a manager that writes into whatever `core.hooksPath` names (overcommit, CaptainHook). The value must be that absolute path: git treats an empty `core.hooksPath` as set, and hooks then resolve against the filesystem root. | planned |
-@@ -101,12 +102,16 @@ A repository **uses** a hook manager when any of these holds:
+ | `hooks-path-env` | Runs the install with `core.hooksPath=<common dir>/hooks` in the next free `GIT_CONFIG_*` slot, preserving a caller's existing entries, for a manager that writes into whatever `core.hooksPath` names (overcommit, CaptainHook). The value must be that absolute path: git treats an empty `core.hooksPath` as set, and hooks then resolve against the filesystem root. The run-time override is exported, so git commands the chained hook starts inherit it, including ones aimed at another repository; only the manager's self-check needs it, so that leak is a known limitation. | implemented |
+@@ -103,12 +104,16 @@
  2. For a manager with nested project configs (prek's workspace mode), one of its config files is tracked anywhere below the root (`git ls-files ':(glob)**/<name>'`). An untracked nested file does not count.
  3. One of the repository's installed hooks (`$(git rev-parse --git-common-dir)/hooks/*`, samples aside) contains the manager's hook marker. This covers an install with a custom config path (`prek install --config ci/hooks.yaml` leaves no standard file name behind) and one made from a nested project.
  
@@ -890,7 +879,7 @@ index 0414e1e96..568abd928 100644
  | Verify check 19d | per repository | **n/a** for a project that does not use prek. |
  | Default-home deny (`Edit(<default>/**)`) | per user | Always, for every registered manager: another repository's terminal commits run from that home. |
  | Host home (dispatcher) | per user | Always, outside the sandbox, for every registered manager: an unused variable is harmless, a missed detection would let a bypassed command inherit the sandbox home. |
-@@ -123,10 +128,13 @@ The two YAML names are shared with pre-commit, so a repository with one uses bot
+@@ -125,11 +130,14 @@
  | `language` | The ecosystem the manager comes from (for the reader, not the implementation). |
  | `upstream` | The manager's source repository. |
  | `detect.config_files` | The config file names that say a repository uses it (bare names, no directories). |
@@ -898,21 +887,22 @@ index 0414e1e96..568abd928 100644
 +| `detect.dev_dependency` | Optional key in root package.json devDependencies; Husky uses `husky`, not every package.json. |
  | `detect.nested` | Whether a tracked config below the root counts (rule 2 of [Detection](#detection)). |
  | `detect.hook_marker` | Text every hook the manager installs contains (rule 3). |
- | `install.subcommand` | The subcommand the shim rewrites. |
+ | `install.subcommand` | The subcommand or flag the shim rewrites. |
+ | `install.aliases` | Other spellings of a flag-style subcommand (`overcommit`: `-i`), matched anywhere in argv. |
  | `install.strategy` | One of the install strategies above. |
 +| `install.path`, `install.saved_key` | For session-start relocation: exact supported path `.husky/_` and repository-local `magpie.localHooksPath`. |
  | `install.flag` | For `git-dir-flag`: the long option that takes the git directory. |
+ | `install.runtime_env` | For `hooks-path-env`: also give every hook run the same `core.hooksPath` override, so a manager that re-checks its install at run time accepts the chained hook. |
  | `home` | Omitted for a manager that keeps nothing outside the repository. |
- | `home.env` | The environment variable that relocates the home. |
-@@ -175,6 +183,7 @@ What a repository or an operator configures is where each manager's environments
+@@ -179,6 +187,7 @@
  | `cargo-husky` | Rust | `none`; detected by a hook mentioning `cargo-husky` | none (no external home) | shipping (in linked worktrees `build.rs` skips hook install: searches for a `.git` directory) |
  | `git-build-hook` | Java | `none`; detected by `pom.xml` (nested too) or a hook mentioning `git-build-hook` | none (no external home) | shipping (JGit `getGitDir()` targets `<worktree>/hooks` in linked worktrees; `configure` goal can set repo-local `core.hooksPath`) |
  | `git-code-format-maven-plugin` | Java | `none`; detected by `pom.xml` (nested too) or a hook mentioning `git-code-format-maven-plugin` | none (no external home) | shipping (JGit `getCommonDirectory()` targets common hooks dir, coexisting cleanly in linked worktrees) |
 +| `husky` | JavaScript | `session-start-relocation`; `.husky` directory or `husky` devDependency, hook marker `.husky` | no cache; host init.sh path guard | implemented; validation pending |
  | `prek` | Rust | `git-dir-flag` (`--git-dir`); detected by `prek.toml`, `.pre-commit-config.yaml` or `.pre-commit-config.yml` (nested too) or a hook mentioning `prek` | `PREK_HOME`: `~/.cache/prek` → sandbox `~/.cache/prek-sandbox`, host `~/.local/share/prek-host` | shipping |
+ | `overcommit` | Ruby | `hooks-path-env` (`--install`, alias `-i`, found anywhere in argv); detected by `.overcommit.yml` or a hook mentioning `overcommit` | none — it keeps its own state in git config and the repository | shipping |
  | `simple-git-hooks` | JavaScript | `none`; detected by `package.json`, `.simple-git-hooks.{js,cjs,json}`, `simple-git-hooks.{js,cjs,json}` or a hook mentioning `simple-git-hooks` | none (no external home) | shipping |
- 
-@@ -220,3 +229,87 @@ What a repository or an operator configures is where each manager's environments
+@@ -233,3 +242,87 @@
  
  - [`setup-isolated-setup-install`](../../plugins/magpie-setup/skills/isolated-setup-install/step-p-sandbox-allowlists.md) Step P.3b-whole-user installs the shim once per adapter the operator uses.
  - [`setup-isolated-setup-verify`](../../plugins/magpie-setup/skills/isolated-setup-verify/SKILL.md) check 19 and [`setup-isolated-setup-update`](../../plugins/magpie-setup/skills/isolated-setup-update/SKILL.md) check the homes through `sandbox-lint`.
@@ -1001,13 +991,14 @@ index 0414e1e96..568abd928 100644
 +sandbox filesystem enforcement is enabled. It does not establish protection for
 +arbitrary XDG paths, disabled filesystem isolation or unseen policy sources.
 diff --git a/tools/hook-manager/registry.json b/tools/hook-manager/registry.json
-index 8f2c5966d..262b834e5 100644
 --- a/tools/hook-manager/registry.json
 +++ b/tools/hook-manager/registry.json
-@@ -41,6 +41,24 @@
+@@ -39,6 +39,24 @@
+       },
+       "install": {
          "strategy": "none"
-       }
-     },
++      }
++    },
 +    "husky": {
 +      "language": "JavaScript",
 +      "upstream": "https://github.com/typicode/husky",
@@ -1024,13 +1015,10 @@ index 8f2c5966d..262b834e5 100644
 +        "strategy": "session-start-relocation",
 +        "path": ".husky/_",
 +        "saved_key": "magpie.localHooksPath"
-+      }
-+    },
+       }
+     },
      "prek": {
-       "language": "Rust",
-       "upstream": "https://github.com/j178/prek",
 diff --git a/tools/sandbox-lint/expected.json b/tools/sandbox-lint/expected.json
-index 073420b37..ec82f634c 100644
 --- a/tools/sandbox-lint/expected.json
 +++ b/tools/sandbox-lint/expected.json
 @@ -132,6 +132,7 @@
@@ -1043,7 +1031,6 @@ index 073420b37..ec82f634c 100644
        "Read(~/.netrc)",
 diff --git a/tools/setup-preflight/tests/test_husky_integration.py b/tools/setup-preflight/tests/test_husky_integration.py
 new file mode 100644
-index 000000000..341b23ea4
 --- /dev/null
 +++ b/tools/setup-preflight/tests/test_husky_integration.py
 @@ -0,0 +1,150 @@
@@ -1198,10 +1185,9 @@ index 000000000..341b23ea4
 +    assert seen.read_text() == "linked-checkout"
 +    assert framework.read_text() == "framework"
 diff --git a/tools/setup-preflight/tests/test_isolated.py b/tools/setup-preflight/tests/test_isolated.py
-index 1b0bfd380..2c8079720 100644
 --- a/tools/setup-preflight/tests/test_isolated.py
 +++ b/tools/setup-preflight/tests/test_isolated.py
-@@ -647,3 +647,145 @@ def test_the_rewritten_config_keeps_its_mode(tmp_path: Path, isolated_home: Path
+@@ -647,3 +647,145 @@
      isolated.session_start(repo, home=isolated_home)
      assert local_hooks_path(repo) == ""
      assert config.stat().st_mode & 0o777 == 0o640
