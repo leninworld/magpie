@@ -1,0 +1,338 @@
+diff --git a/tools/mail-source/imap/README.md b/tools/mail-source/imap/README.md
+index a1781b28d..9efb8f50e 100644
+--- a/tools/mail-source/imap/README.md
++++ b/tools/mail-source/imap/README.md
+@@ -83,7 +83,9 @@ backend), `4` server-side failure.
+ 
+ `<thread-id>` is always the **root** `Message-ID` of the thread, angle
+ brackets included, as emitted by `imap-source-threads` and recorded in the
+-tracker's *Security mailing list thread* field.
++tracker's *Security mailing list thread* field. All commands also accept a
++bare ID such as `report@example.org` on input and normalise it to
++`<report@example.org>`; emitted IDs always include the brackets.
+ 
+ ## Auth + setup
+ 
+diff --git a/tools/mail-source/imap/src/imap_source/create_draft.py b/tools/mail-source/imap/src/imap_source/create_draft.py
+index 1d564feba..0ffb5e08f 100644
+--- a/tools/mail-source/imap/src/imap_source/create_draft.py
++++ b/tools/mail-source/imap/src/imap_source/create_draft.py
+@@ -38,7 +38,7 @@ from imap_source.cli import CapabilityDeclined, eprint, with_mailbox
+ from imap_source.config import ImapConfig
+ from imap_source.mailbox import Mailbox, MailSource
+ from imap_source.searching import fetch_window
+-from imap_source.threads import draft_subject, sort_key
++from imap_source.threads import draft_subject, normalise_thread_id, sort_key
+ 
+ 
+ def create_draft(
+@@ -51,6 +51,7 @@ def create_draft(
+     cc: list[str],
+     from_address: str | None,
+ ) -> dict[str, Any]:
++    thread_id = normalise_thread_id(thread_id)
+     if config.drafts_folder is None:
+         raise CapabilityDeclined(
+             "IMAP_SOURCE_DRAFTS_FOLDER is unset/none — this account cannot create drafts"
+diff --git a/tools/mail-source/imap/src/imap_source/list_drafts.py b/tools/mail-source/imap/src/imap_source/list_drafts.py
+index f72ce18d8..eef89a0f0 100644
+--- a/tools/mail-source/imap/src/imap_source/list_drafts.py
++++ b/tools/mail-source/imap/src/imap_source/list_drafts.py
+@@ -30,7 +30,7 @@ from imap_source.cli import CapabilityDeclined, add_since_argument, eprint, with
+ from imap_source.config import ImapConfig
+ from imap_source.mailbox import Mailbox, MailSource
+ from imap_source.searching import fetch_window
+-from imap_source.threads import sort_key
++from imap_source.threads import normalise_thread_id, sort_key
+ 
+ 
+ def list_drafts(
+@@ -40,6 +40,7 @@ def list_drafts(
+     *,
+     since_days: int,
+ ) -> list[dict[str, Any]]:
++    thread_id = normalise_thread_id(thread_id)
+     if config.drafts_folder is None:
+         raise CapabilityDeclined(
+             "IMAP_SOURCE_DRAFTS_FOLDER is unset/none — this account does not expose drafts ops"
+diff --git a/tools/mail-source/imap/src/imap_source/list_sent_since.py b/tools/mail-source/imap/src/imap_source/list_sent_since.py
+index 2a954e9df..ee625b0a9 100644
+--- a/tools/mail-source/imap/src/imap_source/list_sent_since.py
++++ b/tools/mail-source/imap/src/imap_source/list_sent_since.py
+@@ -30,7 +30,7 @@ from imap_source.cli import CapabilityDeclined, add_since_argument, eprint, with
+ from imap_source.config import ImapConfig
+ from imap_source.mailbox import Mailbox, MailSource
+ from imap_source.searching import fetch_window
+-from imap_source.threads import sort_key
++from imap_source.threads import normalise_thread_id, sort_key
+ 
+ 
+ def list_sent_since(
+@@ -40,6 +40,7 @@ def list_sent_since(
+     *,
+     since_days: int,
+ ) -> list[dict[str, Any]]:
++    thread_id = normalise_thread_id(thread_id)
+     if config.sent_folder is None:
+         raise CapabilityDeclined(
+             "IMAP_SOURCE_SENT_FOLDER is unset/none — this account does not expose the sent op"
+diff --git a/tools/mail-source/imap/src/imap_source/read_thread.py b/tools/mail-source/imap/src/imap_source/read_thread.py
+index b3270efad..08c4cbbca 100644
+--- a/tools/mail-source/imap/src/imap_source/read_thread.py
++++ b/tools/mail-source/imap/src/imap_source/read_thread.py
+@@ -30,7 +30,7 @@ from imap_source.cli import add_since_argument, eprint, with_mailbox
+ from imap_source.config import ImapConfig
+ from imap_source.mailbox import Mailbox, MailSource
+ from imap_source.searching import Message, fetch_window
+-from imap_source.threads import sort_key
++from imap_source.threads import normalise_thread_id, sort_key
+ 
+ 
+ def read_thread(
+@@ -41,6 +41,7 @@ def read_thread(
+     since_days: int,
+     with_body: bool = False,
+ ) -> dict[str, Any]:
++    thread_id = normalise_thread_id(thread_id)
+     messages = fetch_window(mailbox, config.list_folder, since_days=since_days)
+     reachable = [m for m in messages if m.position.references_thread(thread_id)]
+     if not reachable:
+diff --git a/tools/mail-source/imap/src/imap_source/thread_url.py b/tools/mail-source/imap/src/imap_source/thread_url.py
+index 066e961c3..f9039dcc3 100644
+--- a/tools/mail-source/imap/src/imap_source/thread_url.py
++++ b/tools/mail-source/imap/src/imap_source/thread_url.py
+@@ -23,9 +23,11 @@ import argparse
+ from imap_source.archive_url import thread_url as build_thread_url
+ from imap_source.cli import eprint, load_config, run_operation
+ from imap_source.config import ImapConfig
++from imap_source.threads import normalise_thread_id
+ 
+ 
+ def resolve_thread_url(config: ImapConfig, thread_id: str) -> dict[str, str]:
++    thread_id = normalise_thread_id(thread_id)
+     url = build_thread_url(config, thread_id)
+     return {
+         "thread_id": thread_id,
+diff --git a/tools/mail-source/imap/src/imap_source/threads.py b/tools/mail-source/imap/src/imap_source/threads.py
+index ca3cd727e..ce91fc607 100644
+--- a/tools/mail-source/imap/src/imap_source/threads.py
++++ b/tools/mail-source/imap/src/imap_source/threads.py
+@@ -45,6 +45,14 @@ def normalise_message_id(value: str | None) -> str | None:
+     return match.group(0) if match else None
+ 
+ 
++def normalise_thread_id(value: str) -> str:
++    """Canonicalise a caller's single ID without changing header parsing."""
++    token = value.strip()
++    if "<" not in token and ">" not in token:
++        token = f"<{token}>"
++    return token if _MSG_ID.fullmatch(token) else value
++
++
+ @dataclass(frozen=True)
+ class ThreadPosition:
+     """Where one message sits in its thread."""
+diff --git a/tools/mail-source/imap/tests/test_cli_thread_ids.py b/tools/mail-source/imap/tests/test_cli_thread_ids.py
+new file mode 100644
+index 000000000..8d21f567c
+--- /dev/null
++++ b/tools/mail-source/imap/tests/test_cli_thread_ids.py
+@@ -0,0 +1,40 @@
++# Licensed to the Apache Software Foundation (ASF) under one
++# or more contributor license agreements.  See the NOTICE file
++# distributed with this work for additional information
++# regarding copyright ownership.  The ASF licenses this file
++# to you under the Apache License, Version 2.0 (the
++# "License"); you may not use this file except in compliance
++# with the License.  You may obtain a copy of the License at
++#
++#   http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing,
++# software distributed under the License is distributed on an
++# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++# KIND, either express or implied.  See the License for the
++# specific language governing permissions and limitations
++# under the License.
++"""Caller ID parity through the real CLI operation boundary, with synthetic mail."""
++
++from __future__ import annotations
++
++import json
++
++import pytest
++
++from conftest import FakeMailbox, build_message, make_config
++from imap_source.read_thread import main as read_main
++
++
++@pytest.mark.parametrize("thread_id", ["<report@example.org>", "report@example.org"])
++def test_read_cli_accepts_bare_id(thread_id: str, monkeypatch: pytest.MonkeyPatch,
++                                 capsys: pytest.CaptureFixture[str]) -> None:
++    root = "<report@example.org>"
++    box = FakeMailbox.seed(INBOX=[build_message(root, "report", "reporter@example.org")])
++    monkeypatch.setattr("imap_source.cli.load_config", make_config)
++    monkeypatch.setattr("imap_source.cli.Mailbox.connect", lambda _config: box)
++    assert read_main([thread_id]) == 0
++    payload = json.loads(capsys.readouterr().out)
++    assert payload["thread_id"] == root
++    assert payload["message_count"] == 1
++    assert "body_raw" not in payload["messages"][0]
+diff --git a/tools/mail-source/imap/tests/test_config_and_urls.py b/tools/mail-source/imap/tests/test_config_and_urls.py
+index af0176ee8..d83a093ab 100644
+--- a/tools/mail-source/imap/tests/test_config_and_urls.py
++++ b/tools/mail-source/imap/tests/test_config_and_urls.py
+@@ -82,3 +82,19 @@ def test_thread_url_falls_back_to_imap_scheme() -> None:
+     config = make_config()
+     url = thread_url(config, "<report-1@lists.example.org>")
+     assert url == "imap://imap.example.org/INBOX;MSGID=report-1%40lists.example.org"
++
++
++@pytest.mark.parametrize("thread_id", ["report-1@lists.example.org", "<report-1@lists.example.org>"])
++@pytest.mark.parametrize("template", [None, "https://lists.example.org/message/{message_id}/"])
++def test_thread_url_accepts_bare_id_and_emits_canonical_id(thread_id: str, template: str | None) -> None:
++    from imap_source.thread_url import resolve_thread_url
++
++    config = make_config(archive_template=template)
++    result = resolve_thread_url(config, thread_id)
++    assert result == resolve_thread_url(config, "<report-1@lists.example.org>")
++    assert result["thread_id"] == "<report-1@lists.example.org>"
++    expected = (
++        "https://lists.example.org/message/report-1%40lists.example.org/"
++        if template else "imap://imap.example.org/INBOX;MSGID=report-1%40lists.example.org"
++    )
++    assert result["url"] == expected
+diff --git a/tools/mail-source/imap/tests/test_create_draft.py b/tools/mail-source/imap/tests/test_create_draft.py
+index 56f4ec722..ed243bff6 100644
+--- a/tools/mail-source/imap/tests/test_create_draft.py
++++ b/tools/mail-source/imap/tests/test_create_draft.py
+@@ -99,3 +99,41 @@ def test_create_draft_declines_when_server_refuses_append() -> None:
+     box.append = refuse_append  # type: ignore[method-assign]
+     with pytest.raises(CapabilityDeclined):
+         create_draft(box, config, ROOT, body="x", to=["dev@example.org"], cc=[], from_address=None)
++
++
++@pytest.mark.parametrize("thread_id", [ROOT, ROOT[1:-1]])
++@pytest.mark.parametrize("explicit_to", [False, True])
++def test_create_draft_accepts_bare_id_and_keeps_threading(thread_id: str, explicit_to: bool) -> None:
++    config = make_config()
++    box = box_with_thread()
++    result = create_draft(
++        box, config, thread_id, body="thanks for the report\n",
++        to=["reviewer@example.org"] if explicit_to else [],
++        cc=["security@example.org"], from_address="triager@example.org",
++    )
++    assert result["thread_id"] == ROOT
++    assert result["sent"] is False
++    parsed = parse_message(box.folders["Drafts"][result["draft_uid"]])
++    assert parsed["Subject"] == "Re: Bug report"
++    assert parsed["From"] == "triager@example.org"
++    assert parsed["To"] == ("reviewer@example.org" if explicit_to else "dev@example.org")
++    assert parsed["Cc"] == "security@example.org"
++    assert parsed["In-Reply-To"] == REPLY
++    assert parsed["References"] == f"{ROOT} {REPLY}"
++    assert "thanks for the report" in parsed.get_payload()
++
++
++@pytest.mark.parametrize("thread_id", [ROOT, ROOT[1:-1]])
++def test_bare_draft_id_keeps_disabled_capability(thread_id: str) -> None:
++    with pytest.raises(CapabilityDeclined):
++        create_draft(box_with_thread(), make_config(drafts_folder=None), thread_id,
++                     body="x", to=[], cc=[], from_address=None)
++
++
++@pytest.mark.parametrize("thread_id", [ROOT, ROOT[1:-1]])
++def test_bare_draft_id_does_not_change_missing_root_behavior(thread_id: str) -> None:
++    box = FakeMailbox.seed(INBOX=[build_message(REPLY, "reply", "peer@example.org", references=ROOT)],
++                           Drafts=[])
++    with pytest.raises(SystemExit, match=r"thread root .* not found"):
++        create_draft(box, make_config(), thread_id, body="x", to=[], cc=[], from_address=None)
++    assert box.folders["Drafts"] == {}
+diff --git a/tools/mail-source/imap/tests/test_operations.py b/tools/mail-source/imap/tests/test_operations.py
+index 0f238b0f0..091868703 100644
+--- a/tools/mail-source/imap/tests/test_operations.py
++++ b/tools/mail-source/imap/tests/test_operations.py
+@@ -178,3 +178,56 @@ def test_list_drafts_declines_when_folder_is_missing_on_server() -> None:
+     box = seeded_box()
+     with pytest.raises(CapabilityDeclined):
+         list_drafts(box, config, ROOT, since_days=90)
++
++
++@pytest.mark.parametrize("thread_id", [ROOT, ROOT[1:-1], f"  {ROOT[1:-1]}  "])
++@pytest.mark.parametrize("with_body", [False, True])
++def test_read_thread_accepts_bare_message_id(thread_id: str, with_body: bool) -> None:
++    config = make_config()
++    result = read_thread(seeded_box(), config, thread_id, since_days=90, with_body=with_body)
++    expected = read_thread(seeded_box(), config, ROOT, since_days=90, with_body=with_body)
++    assert result == expected
++    assert result["thread_id"] == ROOT
++    assert all(("body_raw" in message) == with_body for message in result["messages"])
++
++
++@pytest.mark.parametrize("thread_id", [ROOT, ROOT[1:-1]])
++def test_read_thread_accepts_bare_id_when_root_is_outside_window(thread_id: str) -> None:
++    box = FakeMailbox.seed(INBOX=[build_message(REPLY, "reply", "peer@example.org", references=ROOT)])
++    result = read_thread(box, make_config(), thread_id, since_days=90)
++    assert result["thread_id"] == ROOT
++    assert [message["message_id"] for message in result["messages"]] == [REPLY]
++
++
++@pytest.mark.parametrize("thread_id", ["<ghost@x>", "ghost@x"])
++def test_read_thread_bare_unknown_id_still_fails(thread_id: str) -> None:
++    with pytest.raises(SystemExit, match="not found"):
++        read_thread(seeded_box(), make_config(), thread_id, since_days=90)
++
++
++@pytest.mark.parametrize("thread_id", [ROOT, ROOT[1:-1]])
++def test_drafts_and_sent_accept_bare_message_id(thread_id: str) -> None:
++    config = make_config()
++    box = seeded_box()
++    assert list_drafts(box, config, thread_id, since_days=90) == list_drafts(
++        box, config, ROOT, since_days=90
++    )
++    assert list_sent_since(box, config, thread_id, since_days=90) == list_sent_since(
++        box, config, ROOT, since_days=90
++    )
++    assert [draft["message_id"] for draft in list_drafts(box, config, thread_id, since_days=90)] == [
++        "<draft-1@example.org>"
++    ]
++    assert [sent["message_id"] for sent in list_sent_since(box, config, thread_id, since_days=90)] == [
++        FOLLOWUP
++    ]
++
++
++@pytest.mark.parametrize("thread_id", [ROOT, ROOT[1:-1]])
++@pytest.mark.parametrize("folder", [None, "Missing"])
++def test_bare_ids_preserve_draft_and_sent_capability_declines(thread_id: str, folder: str | None) -> None:
++    box = seeded_box()
++    with pytest.raises(CapabilityDeclined):
++        list_drafts(box, make_config(drafts_folder=folder), thread_id, since_days=90)
++    with pytest.raises(CapabilityDeclined):
++        list_sent_since(box, make_config(sent_folder=folder), thread_id, since_days=90)
+diff --git a/tools/mail-source/imap/tests/test_threads.py b/tools/mail-source/imap/tests/test_threads.py
+index 3c5daaf64..1e342c4bb 100644
+--- a/tools/mail-source/imap/tests/test_threads.py
++++ b/tools/mail-source/imap/tests/test_threads.py
+@@ -86,3 +86,22 @@ def test_draft_subject_collapses_existing_reply_prefixes() -> None:
+     assert draft_subject("Re: Re[2]: FWD: report") == "Re: report"
+     assert draft_subject("report") == "Re: report"
+     assert draft_subject("") == "Re: (no subject)"
++
++
++def test_caller_thread_ids_are_canonical_and_idempotent() -> None:
++    from imap_source.threads import normalise_thread_id
++
++    for value in ("a@b", "<a@b>", "  a@b  ", "  <a@b>  "):
++        result = normalise_thread_id(value)
++        assert result == "<a@b>"
++        assert normalise_thread_id(result) == result
++    # The existing token grammar does not require an @; don't add a new rule.
++    assert normalise_thread_id("local-token") == "<local-token>"
++    assert normalise_message_id("a@b") is None
++
++
++def test_caller_thread_ids_do_not_reinterpret_invalid_or_multiple_tokens() -> None:
++    from imap_source.threads import normalise_thread_id
++
++    for value in ("", "  ", "<abc", "abc>", "a b", "<a@b> <c@d>", "a@b c@d", "(was) <a@b>"):
++        assert normalise_thread_id(value) == value
